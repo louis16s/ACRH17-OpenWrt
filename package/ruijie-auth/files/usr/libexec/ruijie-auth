@@ -1,101 +1,91 @@
 #!/bin/sh
-
+# Credentials stay in a root-readable UCI file; responses stay in tmpfs.
+umask 077
 CFG="ruijie.main"
 LAST="/tmp/ruijie-auth.last"
-
 get() { uci -q get "$CFG.$1"; }
 
-urlencode_post() {
-	curl -fsS --connect-timeout 5 --max-time 12 \
-		-H "User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/99 Safari/537.36" \
-		-H "Content-Type: application/x-www-form-urlencoded; charset=UTF-8" \
-		${COOKIE:+-H "Cookie: $COOKIE"} \
-		${REFERER:+-H "Referer: $REFERER"} \
-		${ORIGIN:+-H "Origin: $ORIGIN"} \
-		"$@"
+request() {
+	DEVICE="$(get interface)"
+	[ -z "$DEVICE" ] || set -- --interface "$DEVICE" "$@"
+	[ -z "$COOKIE" ] || set -- -H "Cookie: $COOKIE" "$@"
+	[ -z "$REFERER" ] || set -- --referer "$REFERER" "$@"
+	[ -z "$SERVER" ] || set -- -H "Origin: $SERVER" "$@"
+	curl -fsS --noproxy '*' --proto '=http,https' --connect-timeout 5 --max-time 15 \
+		-H 'User-Agent: Mozilla/5.0' \
+		-H 'Content-Type: application/x-www-form-urlencoded; charset=UTF-8' "$@"
 }
 
 status() {
 	CHECK_URL="$(get check_url)"
 	[ -n "$CHECK_URL" ] || CHECK_URL="http://connect.rom.miui.com/generate_204"
-	if curl -fsS --connect-timeout 2 --max-time 4 -o /dev/null "$CHECK_URL"; then
-		echo "online"
-		return 0
-	fi
-	echo "offline"
+	# No redirect following. A captive portal's 200/302 is not Internet access.
+	CODE="$(request -o /dev/null -w '%{http_code}' "$CHECK_URL" 2>/dev/null)" &&
+		[ "$CODE" = '204' ] && { echo online; return 0; }
+	echo offline
 	return 1
 }
 
-login() {
+portal() {
+	ACTION="$1"
 	SERVER="$(get server)"
-	LOGIN_PATH="$(get login_path)"
-	USERNAME="$(get username)"
-	PASSWORD="$(get password_payload)"
-	SERVICE="$(get service)"
-	QUERY="$(get query_string)"
+	PORTAL_PATH="$(get "${ACTION}_path")"
 	COOKIE="$(get cookie)"
 	REFERER="$(get referer)"
-	ORIGIN="$SERVER"
-	OPPWD="$(get operator_pwd)"
-	OPUID="$(get operator_user_id)"
-	VALIDCODE="$(get validcode)"
-	PWENC="$(get password_encrypt)"
-
-	if [ -z "$SERVER" ] || [ -z "$USERNAME" ]; then
-		echo "ERROR: server and userId are required" | tee "$LAST"
-		return 1
+	QUERY="$(get query_string)"
+	case "$SERVER" in http://?*|https://?*) ;; *) echo 'ERROR: HTTP(S) server required'; return 1;; esac
+	case "$PORTAL_PATH" in /*) ;; *) echo 'ERROR: portal path must begin with /'; return 1;; esac
+	set -- --data-urlencode "queryString=$QUERY"
+	if [ "$ACTION" = login ]; then
+		USERNAME="$(get username)"
+		[ -n "$USERNAME" ] || { echo 'ERROR: userId required'; return 1; }
+		set -- "$@" \
+			--data-urlencode "userId=$USERNAME" \
+			--data-urlencode "password=$(get password_payload)" \
+			--data-urlencode "service=$(get service)" \
+			--data-urlencode "operatorPwd=$(get operator_pwd)" \
+			--data-urlencode "operatorUserId=$(get operator_user_id)" \
+			--data-urlencode "validcode=$(get validcode)" \
+			--data-urlencode "passwordEncrypt=$(get password_encrypt)"
 	fi
-
-	RESP="$(urlencode_post -X POST \
-		--data-urlencode "userId=$USERNAME" \
-		--data-urlencode "password=$PASSWORD" \
-		--data-urlencode "service=$SERVICE" \
-		--data-urlencode "queryString=$QUERY" \
-		--data-urlencode "operatorPwd=$OPPWD" \
-		--data-urlencode "operatorUserId=$OPUID" \
-		--data-urlencode "validcode=$VALIDCODE" \
-		--data-urlencode "passwordEncrypt=$PWENC" \
-		"$SERVER$LOGIN_PATH" 2>&1)"
-	RC=$?
-	printf '%s\n' "$RESP" | tee "$LAST"
-	logger -t ruijie-auth "login rc=$RC response=$(printf '%s' "$RESP" | head -c 240)"
-	return $RC
-}
-
-logout() {
-	SERVER="$(get server)"
-	LOGOUT_PATH="$(get logout_path)"
-	COOKIE="$(get cookie)"
-	REFERER="$(get referer)"
-	ORIGIN="$SERVER"
-	QUERY="$(get query_string)"
-
-	[ -n "$SERVER" ] || { echo "ERROR: server is required"; return 1; }
-
-	RESP="$(urlencode_post -X POST \
-		--data-urlencode "queryString=$QUERY" \
-		"$SERVER$LOGOUT_PATH" 2>&1)"
-	RC=$?
-	printf '%s\n' "$RESP" | tee "$LAST"
-	logger -t ruijie-auth "logout rc=$RC response=$(printf '%s' "$RESP" | head -c 240)"
-	return $RC
+	RESPONSE="$(mktemp /tmp/ruijie-auth.response.XXXXXX)" || return 1
+	# Bounded response and atomic status update; never send portal payloads to syslog.
+	if request --max-filesize 65536 -o "$RESPONSE" "$@" "${SERVER%/}$PORTAL_PATH" 2>/dev/null; then
+		RESULT="$(jsonfilter -i "$RESPONSE" -e '@.result' 2>/dev/null)"
+		if [ "$RESULT" = success ]; then
+			RC=0
+			printf '%s: portal reported success\n' "$ACTION" > "$RESPONSE"
+		else
+			RC=1
+			printf '%s: portal rejected request or returned an unrecognized response\n' "$ACTION" > "$RESPONSE"
+		fi
+	else
+		RC=1
+		printf '%s: HTTP or network error\n' "$ACTION" > "$RESPONSE"
+	fi
+	mv -f "$RESPONSE" "$LAST"
+	cat "$LAST"
+	logger -t ruijie-auth "$ACTION rc=$RC"
+	return "$RC"
 }
 
 daemon() {
 	INTERVAL="$(get check_interval)"
-	[ -n "$INTERVAL" ] || INTERVAL=60
+	case "$INTERVAL" in ''|*[!0-9]*) INTERVAL=60;; esac
+	[ "$INTERVAL" -ge 15 ] 2>/dev/null && [ "$INTERVAL" -le 3600 ] 2>/dev/null || INTERVAL=60
 	while true; do
 		if ! status >/dev/null 2>&1; then
-			login >/dev/null 2>&1
+			portal login >/dev/null 2>&1
 		fi
+		# Do not attach authentication headers to the next connectivity probe.
+		SERVER= COOKIE= REFERER=
 		sleep "$INTERVAL"
 	done
 }
 
 case "$1" in
-	login) login ;;
-	logout) logout ;;
-	status) status ;;
-	daemon) daemon ;;
-	*) echo "Usage: $0 {login|logout|status|daemon}"; exit 1 ;;
+	login|logout) portal "$1";;
+	status) status;;
+	daemon) daemon;;
+	*) echo "Usage: $0 {login|logout|status|daemon}"; exit 1;;
 esac

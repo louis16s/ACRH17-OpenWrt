@@ -1,0 +1,10 @@
+#!/bin/sh
+# Only ordinary UCI settings. Preserve the upstream board/radio definitions.
+chmod 600 /etc/config/ruijie
+uci -q set system.@system[0].zram_size_mb='64'
+uci -q commit system
+# Services become active once their real uplinks / printer are configured in LuCI.
+/etc/init.d/mwan3 disable
+uci -q set p910nd.@p910nd[0].enabled='0'
+uci -q commit p910nd
+exit 0

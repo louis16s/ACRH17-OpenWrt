@@ -1,7 +1,7 @@
 local sys = require "luci.sys"
 
 m = Map("ruijie", translate("Ruijie ePortal Authentication"),
-	translate("Configure the Ruijie/ePortal HTTP authentication parameters captured from your school's login request."))
+	translate("Configure the Ruijie/ePortal HTTP authentication parameters captured from your school's login request. Save & Apply before using the action buttons."))
 
 s = m:section(NamedSection, "main", "main", translate("Authentication"))
 
@@ -28,10 +28,12 @@ o = s:option(Value, "service", translate("Service"))
 o = s:option(Value, "query_string", translate("queryString"))
 
 o = s:option(Value, "cookie", translate("Cookie"))
+o.password = true
 
 o = s:option(Value, "referer", translate("Referer"))
 
 o = s:option(Value, "operator_pwd", translate("operatorPwd"))
+o.password = true
 o.optional = true
 
 o = s:option(Value, "operator_user_id", translate("operatorUserId"))
@@ -49,10 +51,13 @@ o = s:option(Value, "check_url", translate("Internet check URL"))
 o.default = "http://connect.rom.miui.com/generate_204"
 
 o = s:option(Value, "check_interval", translate("Reconnect check interval (seconds)"))
-o.datatype = "uinteger"
+o.datatype = "range(15,3600)"
 o.default = "60"
 
-st = m:section(TypedSection, "_status", translate("Actions"))
+o = s:option(Value, "interface", translate("Physical WAN device"))
+o.description = translate("Optional device such as eth0.2. Bind checks and login to the campus uplink so USB failover cannot hide a disconnected campus session.")
+
+st = m:section(NamedSection, "main", "main", translate("Actions"))
 st.anonymous = true
 st.addremove = false
 
@@ -69,13 +74,13 @@ end
 login = st:option(Button, "_login", translate("Login now"))
 login.inputstyle = "apply"
 function login.write()
-	sys.call("/usr/libexec/ruijie-auth login >/tmp/ruijie-auth.last 2>&1")
+	sys.call("/usr/libexec/ruijie-auth login >/dev/null 2>&1")
 end
 
 logout = st:option(Button, "_logout", translate("Logout now"))
 logout.inputstyle = "reset"
 function logout.write()
-	sys.call("/usr/libexec/ruijie-auth logout >/tmp/ruijie-auth.last 2>&1")
+	sys.call("/usr/libexec/ruijie-auth logout >/dev/null 2>&1")
 end
 
 return m
