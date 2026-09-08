@@ -1,0 +1,101 @@
+#!/bin/sh
+
+CFG="ruijie.main"
+LAST="/tmp/ruijie-auth.last"
+
+get() { uci -q get "$CFG.$1"; }
+
+urlencode_post() {
+	curl -fsS --connect-timeout 5 --max-time 12 \
+		-H "User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/99 Safari/537.36" \
+		-H "Content-Type: application/x-www-form-urlencoded; charset=UTF-8" \
+		${COOKIE:+-H "Cookie: $COOKIE"} \
+		${REFERER:+-H "Referer: $REFERER"} \
+		${ORIGIN:+-H "Origin: $ORIGIN"} \
+		"$@"
+}
+
+status() {
+	CHECK_URL="$(get check_url)"
+	[ -n "$CHECK_URL" ] || CHECK_URL="http://connect.rom.miui.com/generate_204"
+	if curl -fsS --connect-timeout 2 --max-time 4 -o /dev/null "$CHECK_URL"; then
+		echo "online"
+		return 0
+	fi
+	echo "offline"
+	return 1
+}
+
+login() {
+	SERVER="$(get server)"
+	LOGIN_PATH="$(get login_path)"
+	USERNAME="$(get username)"
+	PASSWORD="$(get password_payload)"
+	SERVICE="$(get service)"
+	QUERY="$(get query_string)"
+	COOKIE="$(get cookie)"
+	REFERER="$(get referer)"
+	ORIGIN="$SERVER"
+	OPPWD="$(get operator_pwd)"
+	OPUID="$(get operator_user_id)"
+	VALIDCODE="$(get validcode)"
+	PWENC="$(get password_encrypt)"
+
+	if [ -z "$SERVER" ] || [ -z "$USERNAME" ]; then
+		echo "ERROR: server and userId are required" | tee "$LAST"
+		return 1
+	fi
+
+	RESP="$(urlencode_post -X POST \
+		--data-urlencode "userId=$USERNAME" \
+		--data-urlencode "password=$PASSWORD" \
+		--data-urlencode "service=$SERVICE" \
+		--data-urlencode "queryString=$QUERY" \
+		--data-urlencode "operatorPwd=$OPPWD" \
+		--data-urlencode "operatorUserId=$OPUID" \
+		--data-urlencode "validcode=$VALIDCODE" \
+		--data-urlencode "passwordEncrypt=$PWENC" \
+		"$SERVER$LOGIN_PATH" 2>&1)"
+	RC=$?
+	printf '%s\n' "$RESP" | tee "$LAST"
+	logger -t ruijie-auth "login rc=$RC response=$(printf '%s' "$RESP" | head -c 240)"
+	return $RC
+}
+
+logout() {
+	SERVER="$(get server)"
+	LOGOUT_PATH="$(get logout_path)"
+	COOKIE="$(get cookie)"
+	REFERER="$(get referer)"
+	ORIGIN="$SERVER"
+	QUERY="$(get query_string)"
+
+	[ -n "$SERVER" ] || { echo "ERROR: server is required"; return 1; }
+
+	RESP="$(urlencode_post -X POST \
+		--data-urlencode "queryString=$QUERY" \
+		"$SERVER$LOGOUT_PATH" 2>&1)"
+	RC=$?
+	printf '%s\n' "$RESP" | tee "$LAST"
+	logger -t ruijie-auth "logout rc=$RC response=$(printf '%s' "$RESP" | head -c 240)"
+	return $RC
+}
+
+daemon() {
+	INTERVAL="$(get check_interval)"
+	[ -n "$INTERVAL" ] || INTERVAL=60
+	while true; do
+		if ! status >/dev/null 2>&1; then
+			login >/dev/null 2>&1
+		fi
+		sleep "$INTERVAL"
+	done
+}
+
+case "$1" in
+	login) login ;;
+	logout) logout ;;
+	status) status ;;
+	daemon) daemon ;;
+	*) echo "Usage: $0 {login|logout|status|daemon}"; exit 1 ;;
+esac
