@@ -60,7 +60,15 @@ ip netns exec acr-router sysctl -qw net.ipv4.ip_forward=1 net.ipv4.conf.all.rp_f
 for device in br-lan acr-lan acr-r1 acr-r2; do
   ip netns exec acr-router sysctl -qw "net.ipv4.conf.$device.rp_filter=0"
 done
-# Model mwan3's masked packet/connection marks on both hooks.
+# Model firewall4 WAN masquerading and mwan3 masked marks on both hooks.
+ip netns exec acr-router nft -f - <<'NFT'
+table inet test_fw4 {
+  chain srcnat {
+    type nat hook postrouting priority srcnat; policy accept;
+    oifname { "acr-r1", "acr-r2" } masquerade
+  }
+}
+NFT
 ipt() { ip netns exec acr-router iptables-legacy -t mangle "$@"; }
 ipt -N TEST_MWAN
 ipt -A PREROUTING -j TEST_MWAN
