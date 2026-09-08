@@ -8,5 +8,6 @@ PROJECT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 git clone https://github.com/SunBK201/UA3F.git package/UA3F
 git -C package/UA3F checkout --detach "$UA3F_COMMIT"
 python3 "$PROJECT/scripts/patch-ua3f.py" package/UA3F/openwrt/Makefile
+python3 "$PROJECT/scripts/patch-ua3f-mwan3.py" package/UA3F
 cp -R "$PROJECT/package/ruijie-auth" package/
 cp -R "$PROJECT/files" .
