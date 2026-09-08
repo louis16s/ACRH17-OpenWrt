@@ -5,6 +5,9 @@ BIN=$(realpath "$1")
 LOG=/tmp/acrh17-routing-logs
 mkdir -p "$LOG"
 cleanup() {
+  ip netns exec acr-router nft list ruleset >"$LOG/final-nft.txt" 2>/dev/null || true
+  ip netns exec acr-router iptables-legacy-save >"$LOG/final-iptables.txt" 2>/dev/null || true
+  ip -n acr-router route show table all >"$LOG/routes.txt" 2>/dev/null || true
   for ns in acr-router acr-client acr-wan1 acr-wan2; do
     ip netns pids "$ns" 2>/dev/null | xargs -r kill 2>/dev/null || true
     ip netns del "$ns" 2>/dev/null || true
@@ -37,6 +40,7 @@ for i in 1 2; do
   ip -n acr-router addr add "$subnet.2/24" dev "acr-r$i"
   ip -n acr-router link set "acr-r$i" up
   ip -n acr-router route add default via "$subnet.1" dev "acr-r$i" table "$i"
+  ip -n acr-router route add 192.168.8.0/24 dev br-lan table "$i"
   ip -n acr-router rule add priority "$((2000+i))" fwmark "$((i<<24))/0x3f000000" table "$i"
   ip netns exec "acr-wan$i" python3 -u - "$i" >"$LOG/wan$i.log" 2>&1 <<'PY' &
 import http.server,sys
