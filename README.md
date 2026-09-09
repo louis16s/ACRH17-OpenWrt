@@ -1,8 +1,8 @@
-# ASUS RT-ACRH17 · OpenWrt 24.10
+# ASUS RT-ACRH17 · ImmortalWrt 24.10 试验分支
 
-面向 OpBoot 的第一版固件构建项目。使用官方 `ipq40xx/generic` →
-`asus_rt-ac42u` 定义，OpenWrt 分支为 `openwrt-24.10`。
-OpenWrt、packages、LuCI、routing 和 UA3F 的提交固定在 `sources.env`。
+此分支使用 ImmortalWrt 的 `openwrt-24.10` 源码、`ipq40xx/generic` →
+`asus_rt-ac42u` 设备定义，并继承主线功能配置。ImmortalWrt、packages、LuCI、
+routing 和 UA3F 的提交固定在 `sources.env`。
 
 ## 功能与体积
 

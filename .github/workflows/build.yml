@@ -1,4 +1,4 @@
-name: Build RT-ACRH17 OpenWrt
+name: Build RT-ACRH17 ImmortalWrt
 on:
   workflow_dispatch:
   push:
@@ -77,7 +77,7 @@ jobs:
       - name: Upload firmware
         uses: actions/upload-artifact@v4
         with:
-          name: RT-ACRH17-OpenWrt-24.10-${{ github.sha }}
+          name: RT-ACRH17-ImmortalWrt-24.10-${{ github.sha }}
           path: artifacts/
           if-no-files-found: error
           retention-days: 30
