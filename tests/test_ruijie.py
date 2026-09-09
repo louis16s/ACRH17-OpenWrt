@@ -18,6 +18,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
     def do_GET(self):
+        type(self).probe_headers = dict(self.headers)
         self.send_response(type(self).code)
         self.end_headers()
     def do_POST(self):
@@ -65,6 +66,7 @@ class PortalTests(unittest.TestCase):
         self.assertEqual(self.run_auth('status').returncode, 0)
     def test_login_encoding_headers_and_private_status(self):
         Handler.result = 'success'
+        Handler.code = 204
         self.assertEqual(self.run_auth('login').returncode, 0)
         headers, data = Handler.received
         self.assertEqual(headers['Cookie'], 'SESSION=a; other=b c')
@@ -80,6 +82,22 @@ class PortalTests(unittest.TestCase):
         Handler.result = 'success'
         self.assertEqual(self.run_auth('logout').returncode, 0)
         self.assertNotIn('password', Handler.received[1])
+    def test_successful_logout_is_offline(self):
+        Handler.result = 'success'
+        self.assertEqual(self.run_auth('logout').returncode, 0)
+        state = (Path(self.temp.name)/'ruijie-auth.state').read_text()
+        self.assertIn('auth_state=offline', state)
+
+    def test_login_acceptance_does_not_prove_internet(self):
+        Handler.result = 'success'
+        Handler.code = 302
+        self.assertEqual(self.run_auth('login').returncode, 0)
+        state = (Path(self.temp.name)/'ruijie-auth.state').read_text()
+        self.assertIn('auth_state=offline', state)
+        self.assertNotIn('Cookie', Handler.probe_headers)
+        self.assertNotIn('Origin', Handler.probe_headers)
+        Handler.code = 204
+
     def test_invalid_server(self):
         cfg = json.loads(self.env['TEST_CONFIG'])
         cfg['server'] = 'file:///etc/passwd'
