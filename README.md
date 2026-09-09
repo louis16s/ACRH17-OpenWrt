@@ -9,14 +9,14 @@ OpenWrt、packages、LuCI、routing 和 UA3F 的提交固定在 `sources.env`。
 | 功能 | 包 / 实现 |
 | --- | --- |
 | LuCI HTTPS、中文、现代主题 | `luci-ssl`、`luci-app-package-manager`、`luci-theme-openwrt-2020`、`LUCI_LANG_zh_Hans` |
-| UA3F 图形管理 | UA3F v3.6.0 的 `ua3f` 包自带 Lua LuCI，保留 `luci-compat` |
+| UA3F 图形管理 | UA3F v3.6.0 的 `ua3f` 包自带 Lua LuCI，保留 `luci-compat`；首次启动即启用 |
 | 锐捷 ePortal | 自定义 `ruijie-auth`、curl、jsonfilter，LuCI 配置及手动登录/注销 |
 | 双 WAN | `mwan3`、`luci-app-mwan3`、legacy iptables/ip6tables、ipset；系统防火墙为 firewall4 |
 | Android / USB 网卡 / F50 | RNDIS、CDC Ethernet、CDC NCM 驱动 |
 | MBIM 备用支持 | `kmod-usb-net-cdc-mbim`、`umbim`、`luci-proto-mbim`，自动带入 WDM |
 | USB 打印 | `kmod-usb-printer`、`p910nd`、`luci-app-p910nd` |
 | 内存与 TCP | BBR、FQ（24.10 的 `kmod-sched`）、64 MiB zram 逻辑容量 |
-| 时间与 DNS | Asia/Shanghai、阿里/腾讯/公共 NTP、SmartDNS 与 LuCI 管理页（本地 6053 端口） |
+| 时间与 DNS | UTC+8（Asia/Shanghai）、阿里/腾讯/公共 NTP、SmartDNS 与 LuCI 管理页（本地 6053 端口） |
 
 256 MB RAM 是运行预算；128 MB Flash 并非全部可供镜像使用。
 官方设备定义的 `IMAGE_SIZE` 为 **20,439,364 bytes（约 19.5 MiB）**。
@@ -28,6 +28,10 @@ OpenWrt、packages、LuCI、routing 和 UA3F 的提交固定在 `sources.env`。
 首次启动默认 LAN 为 `192.168.5.1`，管理用户为 `root`，密码为 `password`。
 首次登录后应立即更换密码。无线监管域默认设置为中国（CN），不写入超出该
 监管域限制的发射功率。
+
+默认主机名为 `DESKTOP-ACRH17`，以 Windows 电脑风格出现在 DHCP、局域网
+设备列表和部分上游网络记录中。系统时区为 UTC+8（`Asia/Shanghai`，POSIX
+时区字符串为 `CST-8`）。
 
 普通配置使用驱动自动选择的 20/40/80 MHz 频宽。160 MHz 是独立的实验配置，
 默认关闭。确认当地法规、终端和信道支持后，可执行：
@@ -177,7 +181,23 @@ LAN 地址为 `192.168.5.1`。SmartDNS 监听本机 `6053`，dnsmasq 已配置�
 请求转发到该端口；上游服务器和监听端口可通过 LuCI「服务 → SmartDNS」或
 `/etc/config/smartdns` 调整。该 LuCI 应用来自固定的 OpenWrt 24.10 LuCI
 提交，不依赖额外第三方 feed。
-系统时区为 `Asia/Shanghai`，默认 NTP 为阿里云、腾讯云和 `pool.ntp.org`。
+默认 SmartDNS 上游为腾讯 DNSPod（`119.29.29.29`、`119.28.28.28`）和阿里
+DNS（`223.5.5.5`、`223.6.6.6`）；SmartDNS 会在可用上游中选择响应更快的
+结果。默认 NTP 为阿里云、腾讯云和 `pool.ntp.org`。
+
+## 默认启用的 UA3F
+
+UA3F 在首次启动时已启用并设为开机启动，默认使用上游 `TPROXY` 与 `FFF`
+User-Agent 重写规则。若校园认证、银行、流媒体或某个站点出现异常，可先在
+LuCI「服务 → UA3F」关闭验证，再按目标域名细化规则。
+
+## 无线性能分支审查
+
+RT-ACRH17 的 5 GHz 使用 QCA9984，官方 OpenWrt 24.10 设备定义使用
+`ath10k-ct` 与该型号专用 BDF。未发现能在此设备上复现、同时保留 OpenWrt
+24.10、UA3F 和 mwan3 的更高性能维护分支。部分 QSDK/NSS fork 面向 IPQ807x
+和 IPQ6018，不适用于本机的 IPQ4019；以其他设备的 `ath10k` 非 CT 固件
+替换本机固件可能失去 RT-AC42U 专用 BDF，不能作为默认镜像方案。
 
 ## 审查依据
 

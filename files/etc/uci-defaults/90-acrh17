@@ -3,6 +3,7 @@
 chmod 600 /etc/config/ruijie
 uci -q set network.lan.ipaddr='192.168.5.1'
 uci -q set system.@system[0].password='$1$acrh17$WFfNkXLpWCeyWtWOhxynD.'
+uci -q set system.@system[0].hostname='DESKTOP-ACRH17'
 uci -q set system.@system[0].zonename='Asia/Shanghai'
 uci -q set system.@system[0].timezone='CST-8'
 uci -q add_list system.ntp.server='ntp.aliyun.com'
@@ -14,13 +15,37 @@ uci -q add_list dhcp.@dnsmasq[0].server='127.0.0.1#6053'
 uci -q set smartdns.@smartdns[0].enabled='1'
 uci -q set smartdns.@smartdns[0].port='6053'
 uci -q set smartdns.@smartdns[0].auto_set_dnsmasq='1'
+uci -q set smartdns.tencent_primary='server'
+uci -q set smartdns.tencent_primary.enabled='1'
+uci -q set smartdns.tencent_primary.type='udp'
+uci -q set smartdns.tencent_primary.ip='119.29.29.29'
+uci -q set smartdns.tencent_primary.port='53'
+uci -q set smartdns.tencent_secondary='server'
+uci -q set smartdns.tencent_secondary.enabled='1'
+uci -q set smartdns.tencent_secondary.type='udp'
+uci -q set smartdns.tencent_secondary.ip='119.28.28.28'
+uci -q set smartdns.tencent_secondary.port='53'
+uci -q set smartdns.aliyun_primary='server'
+uci -q set smartdns.aliyun_primary.enabled='1'
+uci -q set smartdns.aliyun_primary.type='udp'
+uci -q set smartdns.aliyun_primary.ip='223.5.5.5'
+uci -q set smartdns.aliyun_primary.port='53'
+uci -q set smartdns.aliyun_secondary='server'
+uci -q set smartdns.aliyun_secondary.enabled='1'
+uci -q set smartdns.aliyun_secondary.type='udp'
+uci -q set smartdns.aliyun_secondary.ip='223.6.6.6'
+uci -q set smartdns.aliyun_secondary.port='53'
+uci -q set ua3f.enabled.enabled='1'
 uci -q commit network
 uci -q commit system
 uci -q commit luci
 uci -q commit dhcp
 uci -q commit smartdns
+uci -q commit ua3f
 /etc/init.d/smartdns enable
 /etc/init.d/smartdns start
+/etc/init.d/ua3f enable
+/etc/init.d/ua3f start
 
 # Keep the experimental 160 MHz profile separate and disabled by default.
 # Enable with: uci set acrh17.settings.wifi_160mhz=1; uci commit acrh17; reboot
