@@ -22,7 +22,8 @@ local function wan_ipv4()
 end
 
 m = Map("ruijie", translate("Ruijie ePortal / 锐捷认证"),
-	translate("认证请求使用短超时并在后台运行；操作提交后刷新此页面即可查看最近结果。"))
+	translate("校园网认证中心。认证请求以短超时在后台运行，刷新页面即可查看执行结果。"))
+m:append(Template("ruijie/dashboard"))
 
 status_section = m:section(SimpleSection, translate("当前状态"))
 local function display(name, label, value)
@@ -47,7 +48,8 @@ display("action_result", translate("最近快捷操作"), function()
 	return ({ success = translate("成功"), failed = translate("失败"), running = translate("正在执行") })[result] or "-"
 end)
 
-actions = m:section(SimpleSection, translate("快捷操作"))
+actions = m:section(SimpleSection, translate("认证操作"))
+actions.description = translate("操作会在后台执行，页面不会等待校园门户的完整响应。")
 local function action(name, title, command, style)
 	local button = actions:option(Button, name, title)
 	button.inputstyle = style or "apply"

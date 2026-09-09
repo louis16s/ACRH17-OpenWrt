@@ -55,6 +55,8 @@ for iface in $(uci show wireless 2>/dev/null | sed -n "s/^wireless\.\([^.=]*\)=w
 	radio="$(uci -q get wireless."$iface".device)"
 	band="$(uci -q get wireless."$radio".band)"
 	uci -q set wireless."$iface".disabled='0'
+	uci -q set wireless."$iface".encryption='psk2'
+	uci -q set wireless."$iface".key='password'
 	case "$band" in
 		2g) uci -q set wireless."$iface".ssid='ACRH17-2.4G' ;;
 		5g) uci -q set wireless."$iface".ssid='ACRH17-5G' ;;

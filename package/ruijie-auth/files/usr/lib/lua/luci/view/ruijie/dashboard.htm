@@ -1,0 +1,17 @@
+<%
+local sys = require "luci.sys"
+local function trim(v) return (v or ""):gsub("^%s+", ""):gsub("%s+$", "") end
+local function state(k) return trim(sys.exec("sed -n 's/^" .. k .. "=//p' /tmp/ruijie-auth.state 2>/dev/null | head -n 1")) end
+local wan = trim(sys.exec("uci -q get ruijie.main.wan_interface")); if not wan:match("^[%w_%-]+$") then wan = "wan" end
+local ip = trim(sys.exec("ubus call network.interface." .. wan .. " status 2>/dev/null | jsonfilter -e '@[\"ipv4-address\"][0].address'"))
+local auth = state("auth_state")
+local label = ({online="已联网", authenticating="正在认证", failed="认证失败"})[auth] or "未联网"
+local cls = ({online="online", authenticating="working", failed="failed"})[auth] or "offline"
+local service = sys.call("/etc/init.d/ruijie-auth running >/dev/null 2>&1") == 0 and "运行中" or "已停止"
+%>
+<link rel="stylesheet" href="<%=resource%>/ruijie/dashboard.css">
+<div class="ruijie-dashboard">
+ <div class="ruijie-hero"><div><span>RUIJIE ePORTAL</span><h3>校园网连接状态</h3><p>实时汇总 WAN、procd 和临时认证记录。</p></div><b class="<%=cls%>"><i></i><%=label%></b></div>
+ <div class="ruijie-cards"><div><span>认证服务</span><strong><%=service%></strong><small>procd 管理</small></div><div><span>校园 WAN</span><strong><%=wan%></strong><small><%=ip ~= "" and ip or "尚未获取 IPv4"%></small></div><div><span>最近结果</span><strong><%=state("last_result") ~= "" and state("last_result") or "暂无"%></strong><small><%=state("last_time") ~= "" and state("last_time") or "尚无认证记录"%></small></div></div>
+ <p class="ruijie-summary"><b>认证摘要</b><span><%=state("last_summary") ~= "" and state("last_summary") or "请在下方填写校园门户认证参数"%></span></p>
+</div>
