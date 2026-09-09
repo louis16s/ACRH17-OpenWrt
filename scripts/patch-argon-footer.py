@@ -5,6 +5,18 @@ import sys
 
 root = Path(sys.argv[1])
 marker = 'href="https://530555.xyz"'
+
+# Argon's current Makefile still carries the pre-24.10 conditional
+# ``wget-any`` dependency.  That virtual package is not present in the
+# pinned 24.10 feeds; the non-APK wget dependency is the portable choice.
+makefile = root / "Makefile"
+make_text = makefile.read_text()
+make_text = make_text.replace(
+    'LUCI_DEPENDS:=+USE_APK:wget-any +!USE_APK:wget +jsonfilter',
+    'LUCI_DEPENDS:=+!USE_APK:wget +jsonfilter',
+)
+makefile.write_text(make_text)
+
 for name in ("footer.ut", "footer_login.ut"):
     path = root / "ucode/template/themes/argon" / name
     text = path.read_text()
