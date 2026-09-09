@@ -29,6 +29,7 @@ OpenWrt、packages、LuCI、routing 和 UA3F 的提交固定在 `sources.env`。
 首次启动默认 LAN 为 `192.168.5.1`，管理用户为 `root`，密码直接设为
 `password`。无线监管域默认设为澳大利亚（AU）。首次启动会同时启用两个无线
 网络，SSID 分别为 `ACRH17-2.4G` 与 `ACRH17-5G`。
+两个无线网络默认使用 WPA2-PSK，密码为 `password`。
 
 默认主机名为 `DESKTOP-ACRH17`，以 Windows 电脑风格出现在 DHCP、局域网
 设备列表和部分上游网络记录中。系统时区为 UTC+8（`Asia/Shanghai`，POSIX

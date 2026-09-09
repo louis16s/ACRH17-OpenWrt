@@ -46,6 +46,12 @@ define Package/ruijie-auth/install
 
 	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/model/cbi
 	$(INSTALL_DATA) ./files/usr/lib/lua/luci/model/cbi/ruijie.lua $(1)/usr/lib/lua/luci/model/cbi/ruijie.lua
+
+	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/view/ruijie
+	$(INSTALL_DATA) ./files/usr/lib/lua/luci/view/ruijie/dashboard.htm $(1)/usr/lib/lua/luci/view/ruijie/dashboard.htm
+
+	$(INSTALL_DIR) $(1)/www/luci-static/resources/ruijie
+	$(INSTALL_DATA) ./files/www/luci-static/resources/ruijie/dashboard.css $(1)/www/luci-static/resources/ruijie/dashboard.css
 endef
 
 $(eval $(call BuildPackage,ruijie-auth))
