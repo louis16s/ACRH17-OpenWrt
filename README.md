@@ -174,7 +174,7 @@ F50 时另建 USB WAN 实例，不要默认同时运行多个实例。
 
 DDNS 页面和脚本已编译但默认关闭，不包含服务商、域名或账号。irqbalance 已
 启用并使用包自带的 procd/init 服务，适合 IPQ4019 的四核 CPU，不额外创建
-守护脚本。TurboACC 默认启用软件 flow offloading 与 BBR；硬件 flow offloading、
+守护脚本。TurboACC 默认启用 BBR，软件 flow offloading 默认关闭；硬件 flow offloading、
 Shortcut-FE 和 FullCone 保持关闭，以降低与 UA3F、mwan3 策略路由冲突的概率。
 
 ## BBR 与 zram
@@ -220,3 +220,24 @@ RT-ACRH17 的 5 GHz 使用 QCA9984，官方 OpenWrt 24.10 设备定义使用
 - [mwan3 包和源代码](https://github.com/openwrt/packages/tree/4b4b1f5af9d7aec892ec9148aaccd88590d83982/net/mwan3)
 - [p910nd 包和默认配置](https://github.com/openwrt/packages/tree/4b4b1f5af9d7aec892ec9148aaccd88590d83982/net/p910nd)
 - [UA3F v3.6.0](https://github.com/SunBK201/UA3F/releases/tag/v3.6.0)
+
+## 构建提速与稳定性
+
+同一分支的新完整构建会自动取消旧构建，两个系统的任务按分支隔离。纯 Markdown
+修改不触发完整编译。下载目录与 ccache 分开缓存；ccache 按系统分支、源码锁、
+配置和 runner 系统隔离，容量限制为 2 GiB。首次构建需建立缓存，实际提速以
+后续命中后的耗时为准。第三方源码按固定提交浅拉取。
+
+完整构建会生成 `fast-base-<commit>`，包含专用 standalone ImageBuilder。
+只修改 `files/` 默认配置或锐捷包的脚本、Lua、CSS 时，可以在同分支手动运行
+`Fast RT-ACRH17 image`，输入成功的完整构建 run ID。它检查源码、包配置与构建
+补丁是否匹配，再覆盖当前配置文件和锐捷脚本生成标准 sysupgrade。改变内核、
+feeds、软件包清单、主题上游或包 Makefile 时必须重新完整构建。
+
+快速构建只交付 sysupgrade；首次内存启动测试使用对应完整构建的 initramfs。
+快速构建不会重新编译内核或重新编译上游主题。固件保留 BBR、irqbalance、UA3F、
+SmartDNS；启用 mwan3 或代理重写时应先验证正常路径，再在实机比较软件卸载开关
+对吞吐、重写和故障切换的影响，不把加速开关全部打开作为默认优化。
+
+Argon 通过 UCI `mode=dark` 强制暗色，64 MiB zram 配置持久化。锐捷页面将门户
+返回的认证结果与联网检查分开；HTTP 204 探测成功才记录已联网，注销记录为离线。

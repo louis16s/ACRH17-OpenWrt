@@ -1,0 +1,71 @@
+name: Fast RT-ACRH17 image
+on:
+  workflow_dispatch:
+    inputs:
+      base_run:
+        description: Successful full build run ID from this branch
+        required: true
+        type: string
+permissions:
+  actions: read
+  contents: read
+concurrency:
+  group: acrh17-fast-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BASE_RUN: ${{ inputs.base_run }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate and download matching baseline
+        run: |
+          [[ "$BASE_RUN" =~ ^[0-9]+$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BASE_RUN" > run.json
+          python3 - <<'PY'
+          import json, os
+          r = json.load(open('run.json'))
+          assert r['head_branch'] == os.environ['GITHUB_REF_NAME'], 'Baseline must be from the same branch'
+          assert r['conclusion'] == 'success', 'Baseline must be successful'
+          assert r['path'] == '.github/workflows/build.yml', 'Choose a full build'
+          PY
+          gh run download "$BASE_RUN" --repo "$GITHUB_REPOSITORY" --pattern 'fast-base-*' --dir baseline
+          python3 scripts/fast-base.py check baseline
+      - name: Install tools and validate overlays
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libncurses-dev zlib1g-dev libssl-dev python3 unzip zstd lua5.1
+          sh -n files/etc/uci-defaults/90-acrh17
+          sh -n package/ruijie-auth/files/usr/libexec/ruijie-auth
+          find package -name '*.lua' -exec luac -p {} \;
+          python3 -m unittest discover -s tests -v
+      - name: Build sysupgrade image
+        run: |
+          mkdir -p imagebuilder overlay artifacts
+          tar --zstd -xf baseline/*imagebuilder*.tar.zst --strip-components=1 -C imagebuilder
+          cp -a files/. overlay/
+          cp -a package/ruijie-auth/files/. overlay/
+          chmod 600 overlay/etc/config/ruijie
+          chmod 755 overlay/usr/libexec/ruijie-auth overlay/etc/init.d/ruijie-auth
+          packages=$(python3 - <<'PY'
+          from pathlib import Path
+          print(' '.join(x.removeprefix('CONFIG_PACKAGE_').removesuffix('=y') for x in Path('configs/acrh17.config').read_text().splitlines() if x.startswith('CONFIG_PACKAGE_') and x.endswith('=y') and x != 'CONFIG_PACKAGE_luci-app-turboacc_INCLUDE_OFFLOADING=y'))
+          PY
+          )
+          make -C imagebuilder image PROFILE=asus_rt-ac42u PACKAGES="$packages" FILES="$PWD/overlay" 2>&1 | tee fast-build.log
+          python3 scripts/verify-artifacts.py imagebuilder/bin/targets/ipq40xx/generic --sysupgrade-only
+          cp -a imagebuilder/bin/targets/ipq40xx/generic/. artifacts/
+          cp baseline/project-commit.txt artifacts/base-commit.txt
+          git rev-parse HEAD > artifacts/project-commit.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fast-firmware-${{ github.sha }}
+          path: artifacts/
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fast-logs-${{ github.sha }}
+          path: fast-build.log

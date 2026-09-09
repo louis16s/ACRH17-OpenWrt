@@ -35,6 +35,7 @@ request() {
 }
 
 status() {
+	SERVER= COOKIE= REFERER=
 	CHECK_URL="$(get check_url)"
 	[ -n "$CHECK_URL" ] || CHECK_URL="http://connect.rom.miui.com/generate_204"
 	# No redirect following. A captive portal's 200/302 is not Internet access.
@@ -83,7 +84,13 @@ portal() {
 	fi
 	mv -f "$RESPONSE" "$LAST"
 	if [ "$RC" = 0 ]; then
-		save_state online success "$(cat "$LAST")"
+		if [ "$ACTION" = logout ]; then
+            save_state offline success "$(cat "$LAST")"
+        elif status >/dev/null 2>&1; then
+            save_state online success "$(cat "$LAST")"
+        else
+            save_state offline success "Portal accepted login; Internet probe has not succeeded"
+        fi
 	else
 		save_state failed failure "$(cat "$LAST")"
 	fi

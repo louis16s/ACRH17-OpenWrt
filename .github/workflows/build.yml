@@ -3,15 +3,18 @@ on:
   workflow_dispatch:
   push:
     branches: [main, 'codex/**']
+    paths-ignore: ['**/*.md']
 permissions:
   contents: read
 concurrency:
   group: acrh17-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 360
+    env:
+      CCACHE_MAXSIZE: 2G
     defaults:
       run:
         shell: bash
@@ -56,6 +59,16 @@ jobs:
           cp ../sources.env ../artifacts/
           git rev-parse HEAD > ../artifacts/openwrt-commit.txt
           git -C .. rev-parse HEAD > ../artifacts/project-commit.txt
+      - uses: actions/cache@v4
+        with:
+          path: openwrt/dl
+          key: dl-${{ runner.os }}-${{ github.ref_name }}-${{ hashFiles('sources.env') }}-${{ github.run_id }}
+          restore-keys: dl-${{ runner.os }}-${{ github.ref_name }}-${{ hashFiles('sources.env') }}-
+      - uses: actions/cache@v4
+        with:
+          path: openwrt/.ccache
+          key: cc-${{ runner.os }}-${{ github.ref_name }}-${{ hashFiles('sources.env', 'configs/acrh17.config') }}-${{ github.run_id }}
+          restore-keys: cc-${{ runner.os }}-${{ github.ref_name }}-${{ hashFiles('sources.env', 'configs/acrh17.config') }}-
       - name: Download sources
         working-directory: openwrt
         run: |
@@ -74,12 +87,22 @@ jobs:
         run: |
           python3 scripts/verify-artifacts.py openwrt/bin/targets/ipq40xx/generic
           cp -R openwrt/bin/targets/ipq40xx/generic/. artifacts/
+          mkdir -p fast-base
+          cp openwrt/bin/targets/ipq40xx/generic/*imagebuilder*.tar.zst fast-base/
+          python3 scripts/fast-base.py stamp fast-base
       - name: Upload firmware
         uses: actions/upload-artifact@v4
         with:
           name: RT-ACRH17-ImmortalWrt-24.10-${{ github.sha }}
-          path: artifacts/
+          path: |
+            artifacts/
+            !artifacts/*imagebuilder*.tar.zst
           if-no-files-found: error
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fast-base-${{ github.sha }}
+          path: fast-base/
           retention-days: 30
       - name: Upload full logs
         if: always()
