@@ -3,7 +3,25 @@
 umask 077
 CFG="ruijie.main"
 LAST="/tmp/ruijie-auth.last"
+STATE="/tmp/ruijie-auth.state"
 get() { uci -q get "$CFG.$1"; }
+
+number() {
+	case "$1" in ''|*[!0-9]*) printf '%s' "$2";; *) printf '%s' "$1";; esac
+}
+
+save_state() {
+	state="$1"
+	result="$2"
+	summary="$(printf '%s' "$3" | tr '\n' ' ' | cut -c1-240)"
+	tmp="${STATE}.tmp.$$"
+	{
+		printf 'auth_state=%s\n' "$state"
+		printf 'last_result=%s\n' "$result"
+		printf 'last_time=%s\n' "$(date '+%Y-%m-%d %H:%M:%S')"
+		printf 'last_summary=%s\n' "$summary"
+	} > "$tmp" && mv -f "$tmp" "$STATE"
+}
 
 request() {
 	DEVICE="$(get interface)"
@@ -64,28 +82,86 @@ portal() {
 		printf '%s: HTTP or network error\n' "$ACTION" > "$RESPONSE"
 	fi
 	mv -f "$RESPONSE" "$LAST"
+	if [ "$RC" = 0 ]; then
+		save_state online success "$(cat "$LAST")"
+	else
+		save_state failed failure "$(cat "$LAST")"
+	fi
 	cat "$LAST"
 	logger -t ruijie-auth "$ACTION rc=$RC"
 	return "$RC"
 }
 
+renew_wan() {
+	wan="$(get wan_interface)"
+	[ -n "$wan" ] || wan=wan
+	if ifdown "$wan" >/dev/null 2>&1 && sleep 2 && ifup "$wan" >/dev/null 2>&1; then
+		save_state authenticating pending "WAN DHCP renewed on $wan"
+		logger -t ruijie-auth "wan-renew interface=$wan rc=0"
+		return 0
+	fi
+	save_state failed failure "WAN DHCP renew failed on $wan"
+	logger -t ruijie-auth "wan-renew interface=$wan rc=1"
+	return 1
+}
+
+reauth() {
+	save_state authenticating pending 'Reauthentication requested'
+	portal logout >/dev/null 2>&1 || true
+	sleep 2
+	[ "$(get renew_dhcp_on_reauth)" = 1 ] && renew_wan || true
+	portal login
+}
+
+clear_results() {
+	rm -f "$LAST" "$STATE"
+	logger -t ruijie-auth 'cleared recent authentication results'
+	echo 'recent authentication results cleared'
+}
+
 daemon() {
-	INTERVAL="$(get check_interval)"
-	case "$INTERVAL" in ''|*[!0-9]*) INTERVAL=60;; esac
+	INTERVAL="$(number "$(get check_interval)" 60)"
+	RETRY="$(number "$(get retry_interval)" 30)"
+	MAX_FAILURES="$(number "$(get max_failures)" 3)"
 	[ "$INTERVAL" -ge 15 ] 2>/dev/null && [ "$INTERVAL" -le 3600 ] 2>/dev/null || INTERVAL=60
+	[ "$RETRY" -ge 10 ] 2>/dev/null && [ "$RETRY" -le 3600 ] 2>/dev/null || RETRY=30
+	[ "$MAX_FAILURES" -ge 1 ] 2>/dev/null && [ "$MAX_FAILURES" -le 99 ] 2>/dev/null || MAX_FAILURES=3
+	FAILURES=0
+	[ "$(get boot_login)" = 1 ] && { save_state authenticating pending 'Boot authentication requested'; portal login >/dev/null 2>&1 || true; }
 	while true; do
-		if ! status >/dev/null 2>&1; then
-			portal login >/dev/null 2>&1
+		if [ "$(get auto_reconnect)" != 1 ]; then
+			sleep "$INTERVAL"
+			continue
+		fi
+		if status >/dev/null 2>&1; then
+			FAILURES=0
+		else
+			save_state authenticating pending 'Connectivity check failed; authenticating'
+			if portal login >/dev/null 2>&1; then
+				FAILURES=0
+			else
+				FAILURES=$((FAILURES + 1))
+				if [ "$FAILURES" -ge "$MAX_FAILURES" ]; then
+					case "$(get failure_action)" in
+						restart_wan) renew_wan || true;;
+						restart_service) /etc/init.d/ruijie-auth restart >/dev/null 2>&1 || true;;
+					esac
+					FAILURES=0
+				fi
+			fi
 		fi
 		# Do not attach authentication headers to the next connectivity probe.
 		SERVER= COOKIE= REFERER=
-		sleep "$INTERVAL"
+		sleep "$([ "$FAILURES" -gt 0 ] && printf '%s' "$RETRY" || printf '%s' "$INTERVAL")"
 	done
 }
 
 case "$1" in
 	login|logout) portal "$1";;
 	status) status;;
+	reauth) reauth;;
+	renew-wan) renew_wan;;
+	clear) clear_results;;
 	daemon) daemon;;
-	*) echo "Usage: $0 {login|logout|status|daemon}"; exit 1;;
+	*) echo "Usage: $0 {login|logout|reauth|renew-wan|clear|status|daemon}"; exit 1;;
 esac

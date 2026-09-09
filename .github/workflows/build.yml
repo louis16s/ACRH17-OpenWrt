@@ -25,6 +25,9 @@ jobs:
       - name: Validate project scripts
         run: |
           sh -n scripts/prepare.sh
+          sh -n files/etc/uci-defaults/90-acrh17
+          sh -n files/usr/libexec/acrh17-usbwan-redial
+          sh -n files/usr/libexec/acrh17-usb-net-status
           sh -n package/ruijie-auth/files/usr/libexec/ruijie-auth
           sh -n package/ruijie-auth/files/etc/init.d/ruijie-auth
           find package -name '*.lua' -exec luac -p {} \;

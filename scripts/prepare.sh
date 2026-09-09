@@ -10,4 +10,5 @@ git -C package/UA3F checkout --detach "$UA3F_COMMIT"
 python3 "$PROJECT/scripts/patch-ua3f.py" package/UA3F/openwrt/Makefile
 python3 "$PROJECT/scripts/patch-ua3f-mwan3.py" package/UA3F
 cp -R "$PROJECT/package/ruijie-auth" package/
+cp -R "$PROJECT/package/usb-printer-status" package/
 cp -R "$PROJECT/files" .

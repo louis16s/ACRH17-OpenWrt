@@ -47,15 +47,6 @@ uci -q commit ua3f
 /etc/init.d/ua3f enable
 /etc/init.d/ua3f start
 
-# Keep the experimental 160 MHz profile separate and disabled by default.
-# Enable with: uci set acrh17.settings.wifi_160mhz=1; uci commit acrh17; reboot
-if [ "$(uci -q get acrh17.settings.wifi_160mhz)" = '1' ]; then
-	for radio in $(uci show wireless 2>/dev/null | sed -n "s/^wireless\.\([^.=]*\)=wifi-device$/\1/p"); do
-		[ "$(uci -q get wireless."$radio".band)" = '5g' ] || continue
-		uci -q set wireless."$radio".htmode='VHT160'
-	done
-	uci -q commit wireless
-fi
 for radio in $(uci show wireless 2>/dev/null | sed -n "s/^wireless\.\([^.=]*\)=wifi-device$/\1/p"); do
 	uci -q set wireless."$radio".country="$(uci -q get acrh17.settings.wifi_country || echo CN)"
 done
@@ -67,4 +58,32 @@ uci -q commit mwan3
 /etc/init.d/mwan3 disable
 uci -q set p910nd.@p910nd[0].enabled='0'
 uci -q commit p910nd
+/etc/init.d/watchcat disable
+/etc/init.d/ddns disable
+/etc/init.d/sqm disable
+uci -q set irqbalance.irqbalance.enabled='1'
+uci -q commit irqbalance
+/etc/init.d/irqbalance enable
+/etc/init.d/irqbalance start
+
+# Commands remain short and read the USB WAN logical interface from UCI.
+uci -q add luci command
+uci -q set luci.@command[-1].name='重新认证锐捷'
+uci -q set luci.@command[-1].command='/usr/libexec/ruijie-auth reauth'
+uci -q add luci command
+uci -q set luci.@command[-1].name='重启 UA3F'
+uci -q set luci.@command[-1].command='/etc/init.d/ua3f restart'
+uci -q add luci command
+uci -q set luci.@command[-1].name='重拨 USB WAN'
+uci -q set luci.@command[-1].command='/usr/libexec/acrh17-usbwan-redial'
+uci -q add luci command
+uci -q set luci.@command[-1].name='重启打印服务'
+uci -q set luci.@command[-1].command='/etc/init.d/p910nd restart'
+uci -q add luci command
+uci -q set luci.@command[-1].name='查看 USB 设备'
+uci -q set luci.@command[-1].command='lsusb'
+uci -q add luci command
+uci -q set luci.@command[-1].name='查看 USB 网络驱动状态'
+uci -q set luci.@command[-1].command='/usr/libexec/acrh17-usb-net-status'
+uci -q commit luci
 exit 0

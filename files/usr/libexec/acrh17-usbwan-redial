@@ -1,0 +1,8 @@
+#!/bin/sh
+
+iface="$(uci -q get acrh17.settings.usbwan_interface)"
+[ -n "$iface" ] || iface=usbwan
+
+ifdown "$iface" || exit 1
+sleep 2
+ifup "$iface"

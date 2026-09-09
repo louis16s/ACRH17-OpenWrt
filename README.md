@@ -17,6 +17,7 @@ OpenWrt、packages、LuCI、routing 和 UA3F 的提交固定在 `sources.env`。
 | USB 打印 | `kmod-usb-printer`、`p910nd`、`luci-app-p910nd` |
 | 内存与 TCP | BBR、FQ（24.10 的 `kmod-sched`）、64 MiB zram 逻辑容量 |
 | 时间与 DNS | UTC+8（Asia/Shanghai）、阿里/腾讯/公共 NTP、SmartDNS 与 LuCI 管理页（本地 6053 端口） |
+| 维护工具 | watchcat、LuCI 命令、irqbalance、DDNS、SQM；除 irqbalance 外默认关闭 |
 
 256 MB RAM 是运行预算；128 MB Flash 并非全部可供镜像使用。
 官方设备定义的 `IMAGE_SIZE` 为 **20,439,364 bytes（约 19.5 MiB）**。
@@ -33,23 +34,8 @@ OpenWrt、packages、LuCI、routing 和 UA3F 的提交固定在 `sources.env`。
 设备列表和部分上游网络记录中。系统时区为 UTC+8（`Asia/Shanghai`，POSIX
 时区字符串为 `CST-8`）。
 
-普通配置使用驱动自动选择的 20/40/80 MHz 频宽。160 MHz 是独立的实验配置，
-默认关闭。确认当地法规、终端和信道支持后，可执行：
-
-```sh
-uci set acrh17.settings.wifi_160mhz='1'
-uci commit acrh17
-reboot
-```
-
-启用后 5 GHz 无线尝试使用 `VHT160`；DFS、监管域、干扰或驱动能力不足时，
-可能自动退回较窄频宽或无法启动。恢复常规配置：
-
-```sh
-uci set acrh17.settings.wifi_160mhz='0'
-uci commit acrh17
-reboot
-```
+无线保持标准 OpenWrt 24.10 配置，不强制 160 MHz，也不修改校准、ART、EEPROM
+或其他无线相关受保护分区。
 
 ## 构建和验证
 
@@ -116,7 +102,7 @@ mode-switch 指令。路由器只有一个 USB 端口；同时连接 F50 与打�
 首版建议主 WAN 优先、USB 备用，测试拔线、恢复和 DNS。mwan3 安装后默认未
 启用自启动，完成真实上联配置后再启用服务。
 
-UA3F 在「服务 → UA3F」，保持完整上游 LuCI 界面，默认关闭。
+UA3F 在「服务 → UA3F」，保持完整上游 LuCI 界面，首次启动默认启用。
 它在本镜像中可使用 nftables TPROXY；对应 tproxy / queue 内核模块已包含。
 构建补丁补齐 `luci-base/host` 的 po2lmo 依赖和 Build/Prepare 目录创建。
 
@@ -162,6 +148,38 @@ queryString/Cookie 或会话令牌，需要根据该校园的成功请求进一�
 客户端使用 RAW / AppSocket 9100 并安装该打印机的厂商驱动。
 p910nd 不提供渲染驱动，也不保证所有仅支持专有协议的打印机可用。
 若双向模式导致异常，可在 LuCI 切换该选项后重新测试。
+
+「服务 → USB Printer Status」提供轻量状态页：列出所有 `/dev/usb/lp*`、
+`lsusb` 返回的 Vendor ID / Product ID / 产品名、p910nd 运行状态、实际 RAW
+端口和当前 LAN 地址。没有打印机时页面显示“未检测到 USB Printer”；p910nd
+运行但设备节点消失时会分别显示服务仍在运行和设备缺失。该页只提供启动、
+停止和重启 p910nd，不管理打印队列，也不安装 CUPS、厂商驱动或 Avahi。
+
+## 校园认证、维护命令和自动恢复
+
+「服务 → Ruijie ePortal / 锐捷认证」显示 procd 服务状态、最近认证状态、
+校园 WAN 逻辑接口及 IPv4 地址、默认网关、最近认证时间/结果/摘要和自动重连
+状态。登录、注销、重新认证、按需 DHCP 更新、清除结果和服务重启均在后台
+执行，避免 LuCI 因门户超时而卡住；最近日志仅从 RAM 中的 `logread` 读取 80 行。
+
+自动恢复支持开机认证、断线重认证、检测及重试间隔、最大失败次数，以及仅重试、
+重启 WAN 逻辑接口或重启认证服务三种失败动作。默认不会重启整台路由器。
+
+「系统 → 自定义命令」预置重新认证锐捷、重启 UA3F、重拨 UCI 中配置的 USB
+WAN、重启 p910nd、查看 USB 设备及查看 USB 网络驱动状态。USB WAN 默认逻辑
+接口名为 `usbwan`，可通过 `acrh17.settings.usbwan_interface` 调整；命令不会
+重启校园 WAN。
+
+watchcat 已编译但默认关闭，也没有预置实例。建议仅为校园主 WAN 建立一个
+检测实例，并将断线动作设置为重启该网络接口。检测目标使用学校可访问的稳定
+IP 或 URL；不要把 Google、Cloudflare 等作为校园网络唯一检测目标。需要监测
+F50 时另建 USB WAN 实例，不要默认同时运行多个实例。
+
+DDNS 页面和脚本已编译但默认关闭，不包含服务商、域名或账号。SQM 及 LuCI
+页面同样已编译并默认关闭，不预设 CAKE、速率或 WAN qdisc。IPQ4019 开启
+SQM/CAKE 后可能明显降低高带宽 NAT 吞吐量，建议仅在 USB 4G/5G、高延迟链路
+或 bufferbloat 明显时自行启用。irqbalance 已启用并使用包自带的 procd/init
+服务，适合 IPQ4019 的四核 CPU，不额外创建守护脚本。
 
 ## BBR 与 zram
 

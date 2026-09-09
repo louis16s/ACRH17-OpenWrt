@@ -1,0 +1,5 @@
+#!/bin/sh
+
+ip -br link
+echo
+dmesg | grep -Ei 'usb|rndis|cdc|ncm|mbim' | tail -n 80
