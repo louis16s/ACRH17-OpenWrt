@@ -37,6 +37,7 @@ jobs:
           python3 -m unittest discover -s tests -v
       - name: Checkout pinned OpenWrt and feeds
         run: |
+          set -o pipefail
           source sources.env
           git init openwrt
           git -C openwrt remote add origin "$OPENWRT_REPOSITORY"
@@ -53,7 +54,7 @@ jobs:
           ../scripts/prepare.sh 2>&1 | tee ../logs/prepare.log
           cp ../configs/acrh17.config .config
           make defconfig 2>&1 | tee ../logs/defconfig.log
-          python3 ../scripts/verify-config.py ../configs/acrh17.config .config
+          python3 ../scripts/verify-config.py ../configs/acrh17.config .config 2>&1 | tee ../logs/verify-config.log
           cp .config ../artifacts/build.config
           ./scripts/diffconfig.sh > ../artifacts/diffconfig
           cp ../sources.env ../artifacts/

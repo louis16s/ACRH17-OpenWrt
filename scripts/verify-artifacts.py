@@ -11,8 +11,13 @@ for suffix in suffixes:
         assert images[0].stat().st_size <= 20439364, 'Official device image size exceeded'
 manifest = next(p.glob('*.manifest')).read_text()
 packages = {line.split()[0] for line in manifest.splitlines() if line.strip()}
-required = {line.split('CONFIG_PACKAGE_', 1)[1].split('=')[0] for line in Path('configs/acrh17.config').read_text().splitlines() if line.startswith('CONFIG_PACKAGE_') and line.endswith('=y')}
-required -= {'luci-app-turboacc_INCLUDE_OFFLOADING'}
+required = {
+    line.split('CONFIG_PACKAGE_', 1)[1].split('=')[0]
+    for line in Path('configs/acrh17.config').read_text().splitlines()
+    if line.startswith('CONFIG_PACKAGE_')
+    and line.endswith('=y')
+    and '_INCLUDE_' not in line
+}
 assert not required - packages, 'Missing packages: ' + str(required - packages)
 for name in packages:
     assert not any(x in name.lower() for x in ['clash', 'adguard', 'samba', 'docker']), name
