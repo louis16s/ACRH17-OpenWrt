@@ -8,7 +8,7 @@ OpenWrt、packages、LuCI、routing 和 UA3F 的提交固定在 `sources.env`。
 
 | 功能 | 包 / 实现 |
 | --- | --- |
-| LuCI HTTPS、中文、现代主题 | `luci-ssl`、`luci-app-package-manager`、`luci-theme-openwrt-2020`、`LUCI_LANG_zh_Hans` |
+| LuCI HTTPS、中文、Argon Dark 主题 | `luci-ssl`、`luci-app-package-manager`、`luci-theme-argon`、`LUCI_LANG_zh_Hans` |
 | UA3F 图形管理 | UA3F v3.6.0 的 `ua3f` 包自带 Lua LuCI，保留 `luci-compat`；首次启动即启用 |
 | 锐捷 ePortal | 自定义 `ruijie-auth`、curl、jsonfilter，LuCI 配置及手动登录/注销 |
 | 双 WAN | `mwan3`、`luci-app-mwan3`、legacy iptables/ip6tables、ipset；系统防火墙为 firewall4 |
@@ -17,7 +17,7 @@ OpenWrt、packages、LuCI、routing 和 UA3F 的提交固定在 `sources.env`。
 | USB 打印 | `kmod-usb-printer`、`p910nd`、`luci-app-p910nd` |
 | 内存与 TCP | BBR、FQ（24.10 的 `kmod-sched`）、64 MiB zram 逻辑容量 |
 | 时间与 DNS | UTC+8（Asia/Shanghai）、阿里/腾讯/公共 NTP、SmartDNS 与 LuCI 管理页（本地 6053 端口） |
-| 维护工具 | watchcat、LuCI 命令、irqbalance、DDNS、SQM；除 irqbalance 外默认关闭 |
+| 维护工具 | watchcat、LuCI 命令、irqbalance、DDNS、TurboACC；watchcat 与 DDNS 默认关闭 |
 
 256 MB RAM 是运行预算；128 MB Flash 并非全部可供镜像使用。
 官方设备定义的 `IMAGE_SIZE` 为 **20,439,364 bytes（约 19.5 MiB）**。
@@ -26,9 +26,9 @@ OpenWrt、packages、LuCI、routing 和 UA3F 的提交固定在 `sources.env`。
 项目不安装 Clash、AdGuard Home、Samba、Docker；不修改设备树或分区布局。
 不修改或制作 ART、EEPROM、Factory、calibration、Bootloader 分区内容。
 
-首次启动默认 LAN 为 `192.168.5.1`，管理用户为 `root`，密码为 `password`。
-首次登录后应立即更换密码。无线监管域默认设置为中国（CN），不写入超出该
-监管域限制的发射功率。
+首次启动默认 LAN 为 `192.168.5.1`，管理用户为 `root`，密码直接设为
+`password`。无线监管域默认设为澳大利亚（AU）。首次启动会同时启用两个无线
+网络，SSID 分别为 `ACRH17-2.4G` 与 `ACRH17-5G`。
 
 默认主机名为 `DESKTOP-ACRH17`，以 Windows 电脑风格出现在 DHCP、局域网
 设备列表和部分上游网络记录中。系统时区为 UTC+8（`Asia/Shanghai`，POSIX
@@ -36,6 +36,8 @@ OpenWrt、packages、LuCI、routing 和 UA3F 的提交固定在 `sources.env`。
 
 无线保持标准 OpenWrt 24.10 配置，不强制 160 MHz，也不修改校准、ART、EEPROM
 或其他无线相关受保护分区。
+
+默认 LuCI 使用 Argon Dark，页脚包含作者链接：[番鼠大王](https://530555.xyz)。
 
 ## 构建和验证
 
@@ -149,12 +151,6 @@ queryString/Cookie 或会话令牌，需要根据该校园的成功请求进一�
 p910nd 不提供渲染驱动，也不保证所有仅支持专有协议的打印机可用。
 若双向模式导致异常，可在 LuCI 切换该选项后重新测试。
 
-「服务 → USB Printer Status」提供轻量状态页：列出所有 `/dev/usb/lp*`、
-`lsusb` 返回的 Vendor ID / Product ID / 产品名、p910nd 运行状态、实际 RAW
-端口和当前 LAN 地址。没有打印机时页面显示“未检测到 USB Printer”；p910nd
-运行但设备节点消失时会分别显示服务仍在运行和设备缺失。该页只提供启动、
-停止和重启 p910nd，不管理打印队列，也不安装 CUPS、厂商驱动或 Avahi。
-
 ## 校园认证、维护命令和自动恢复
 
 「服务 → Ruijie ePortal / 锐捷认证」显示 procd 服务状态、最近认证状态、
@@ -175,11 +171,10 @@ watchcat 已编译但默认关闭，也没有预置实例。建议仅为校园�
 IP 或 URL；不要把 Google、Cloudflare 等作为校园网络唯一检测目标。需要监测
 F50 时另建 USB WAN 实例，不要默认同时运行多个实例。
 
-DDNS 页面和脚本已编译但默认关闭，不包含服务商、域名或账号。SQM 及 LuCI
-页面同样已编译并默认关闭，不预设 CAKE、速率或 WAN qdisc。IPQ4019 开启
-SQM/CAKE 后可能明显降低高带宽 NAT 吞吐量，建议仅在 USB 4G/5G、高延迟链路
-或 bufferbloat 明显时自行启用。irqbalance 已启用并使用包自带的 procd/init
-服务，适合 IPQ4019 的四核 CPU，不额外创建守护脚本。
+DDNS 页面和脚本已编译但默认关闭，不包含服务商、域名或账号。irqbalance 已
+启用并使用包自带的 procd/init 服务，适合 IPQ4019 的四核 CPU，不额外创建
+守护脚本。TurboACC 默认启用软件 flow offloading 与 BBR；硬件 flow offloading、
+Shortcut-FE 和 FullCone 保持关闭，以降低与 UA3F、mwan3 策略路由冲突的概率。
 
 ## BBR 与 zram
 
