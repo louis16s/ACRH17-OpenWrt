@@ -16,7 +16,7 @@ OpenWrt、packages、LuCI、routing 和 UA3F 的提交固定在 `sources.env`。
 | MBIM 备用支持 | `kmod-usb-net-cdc-mbim`、`umbim`、`luci-proto-mbim`，自动带入 WDM |
 | USB 打印 | `kmod-usb-printer`、`p910nd`、`luci-app-p910nd` |
 | 内存与 TCP | BBR、FQ（24.10 的 `kmod-sched`）、64 MiB zram 逻辑容量 |
-| 时间与 DNS | Asia/Shanghai、阿里/腾讯/公共 NTP、SmartDNS 守护进程（本地 6053 端口） |
+| 时间与 DNS | Asia/Shanghai、阿里/腾讯/公共 NTP、SmartDNS 与 LuCI 管理页（本地 6053 端口） |
 
 256 MB RAM 是运行预算；128 MB Flash 并非全部可供镜像使用。
 官方设备定义的 `IMAGE_SIZE` 为 **20,439,364 bytes（约 19.5 MiB）**。
@@ -174,7 +174,9 @@ BBR 调节路由器自身终止或发起的 TCP（包括代理连接），不会
 ## 默认网络、NTP 和 SmartDNS
 
 LAN 地址为 `192.168.5.1`。SmartDNS 监听本机 `6053`，dnsmasq 已配置为将 DNS
-请求转发到该端口；上游服务器和监听端口可通过 `/etc/config/smartdns` 调整。
+请求转发到该端口；上游服务器和监听端口可通过 LuCI「服务 → SmartDNS」或
+`/etc/config/smartdns` 调整。该 LuCI 应用来自固定的 OpenWrt 24.10 LuCI
+提交，不依赖额外第三方 feed。
 系统时区为 `Asia/Shanghai`，默认 NTP 为阿里云、腾讯云和 `pool.ntp.org`。
 
 ## 审查依据
