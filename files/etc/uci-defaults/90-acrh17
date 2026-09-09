@@ -1,8 +1,39 @@
 #!/bin/sh
 # Only ordinary UCI settings. Preserve the upstream board/radio definitions.
 chmod 600 /etc/config/ruijie
-uci -q set system.@system[0].zram_size_mb='64'
+uci -q set network.lan.ipaddr='192.168.5.1'
+uci -q set system.@system[0].password='$1$acrh17$WFfNkXLpWCeyWtWOhxynD.'
+uci -q set system.@system[0].zonename='Asia/Shanghai'
+uci -q set system.@system[0].timezone='CST-8'
+uci -q add_list system.ntp.server='ntp.aliyun.com'
+uci -q add_list system.ntp.server='ntp.tencent.com'
+uci -q add_list system.ntp.server='pool.ntp.org'
+uci -q set luci.main.mediaurlbase='/luci-static/openwrt2020'
+uci -q set dhcp.@dnsmasq[0].noresolv='1'
+uci -q add_list dhcp.@dnsmasq[0].server='127.0.0.1#6053'
+uci -q set smartdns.@smartdns[0].enabled='1'
+uci -q set smartdns.@smartdns[0].port='6053'
+uci -q set smartdns.@smartdns[0].bind='0.0.0.0:6053'
+uci -q commit network
 uci -q commit system
+uci -q commit luci
+uci -q commit dhcp
+uci -q commit smartdns
+/etc/init.d/smartdns enable
+/etc/init.d/smartdns start
+
+# Keep the experimental 160 MHz profile separate and disabled by default.
+# Enable with: uci set acrh17.settings.wifi_160mhz=1; uci commit acrh17; reboot
+if [ "$(uci -q get acrh17.settings.wifi_160mhz)" = '1' ]; then
+	for radio in $(uci show wireless 2>/dev/null | sed -n "s/^wireless\.\([^.=]*\)=wifi-device$/\1/p"); do
+		uci -q set wireless."$radio".htmode='VHT160'
+	done
+	uci -q commit wireless
+fi
+uci -q set wireless.radio0.country="$(uci -q get acrh17.settings.wifi_country || echo CN)"
+uci -q set wireless.radio1.country="$(uci -q get acrh17.settings.wifi_country || echo CN)"
+uci -q commit wireless
+uci -q set system.@system[0].zram_size_mb='64'
 # Services become active once their real uplinks / printer are configured in LuCI.
 uci -q set mwan3.globals.mmx_mask='0x3f000000'
 uci -q commit mwan3

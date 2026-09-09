@@ -8,7 +8,7 @@ OpenWrt、packages、LuCI、routing 和 UA3F 的提交固定在 `sources.env`。
 
 | 功能 | 包 / 实现 |
 | --- | --- |
-| LuCI HTTPS、中文 | `luci-ssl`、`luci-app-package-manager`、`LUCI_LANG_zh_Hans` |
+| LuCI HTTPS、中文、现代主题 | `luci-ssl`、`luci-app-package-manager`、`luci-theme-openwrt-2020`、`LUCI_LANG_zh_Hans` |
 | UA3F 图形管理 | UA3F v3.6.0 的 `ua3f` 包自带 Lua LuCI，保留 `luci-compat` |
 | 锐捷 ePortal | 自定义 `ruijie-auth`、curl、jsonfilter，LuCI 配置及手动登录/注销 |
 | 双 WAN | `mwan3`、`luci-app-mwan3`、legacy iptables/ip6tables、ipset；系统防火墙为 firewall4 |
@@ -16,14 +16,36 @@ OpenWrt、packages、LuCI、routing 和 UA3F 的提交固定在 `sources.env`。
 | MBIM 备用支持 | `kmod-usb-net-cdc-mbim`、`umbim`、`luci-proto-mbim`，自动带入 WDM |
 | USB 打印 | `kmod-usb-printer`、`p910nd`、`luci-app-p910nd` |
 | 内存与 TCP | BBR、FQ（24.10 的 `kmod-sched`）、64 MiB zram 逻辑容量 |
+| 时间与 DNS | Asia/Shanghai、阿里/腾讯/公共 NTP、SmartDNS 守护进程（本地 6053 端口） |
 
 256 MB RAM 是运行预算；128 MB Flash 并非全部可供镜像使用。
 官方设备定义的 `IMAGE_SIZE` 为 **20,439,364 bytes（约 19.5 MiB）**。
 工作流同时检查镜像存在、大小和完整包清单。
 
-项目遵守首版约束：不安装 Clash、AdGuard Home、Samba、Docker；
-不修改无线国家码、功率、160 MHz 配置、设备树或分区布局。
+项目不安装 Clash、AdGuard Home、Samba、Docker；不修改设备树或分区布局。
 不修改或制作 ART、EEPROM、Factory、calibration、Bootloader 分区内容。
+
+首次启动默认 LAN 为 `192.168.5.1`，管理用户为 `root`，密码为 `password`。
+首次登录后应立即更换密码。无线监管域默认设置为中国（CN），不写入超出该
+监管域限制的发射功率。
+
+普通配置使用驱动自动选择的 20/40/80 MHz 频宽。160 MHz 是独立的实验配置，
+默认关闭。确认当地法规、终端和信道支持后，可执行：
+
+```sh
+uci set acrh17.settings.wifi_160mhz='1'
+uci commit acrh17
+reboot
+```
+
+启用后 5 GHz 无线尝试使用 `VHT160`；DFS、监管域、干扰或驱动能力不足时，
+可能自动退回较窄频宽或无法启动。恢复常规配置：
+
+```sh
+uci set acrh17.settings.wifi_160mhz='0'
+uci commit acrh17
+reboot
+```
 
 ## 构建和验证
 
@@ -148,6 +170,12 @@ cat /proc/swaps
 BBR 调节路由器自身终止或发起的 TCP（包括代理连接），不会替换纯转发
 客户端的拥塞控制算法。64 MiB zram 是压缩交换设备的逻辑容量，实际压缩
 页仍消耗 RAM；它不写 Flash。UA3F 的实际内存占用需在并发负载下测量。
+
+## 默认网络、NTP 和 SmartDNS
+
+LAN 地址为 `192.168.5.1`。SmartDNS 监听本机 `6053`，dnsmasq 已配置为将 DNS
+请求转发到该端口；上游服务器和监听端口可通过 `/etc/config/smartdns` 调整。
+系统时区为 `Asia/Shanghai`，默认 NTP 为阿里云、腾讯云和 `pool.ntp.org`。
 
 ## 审查依据
 
