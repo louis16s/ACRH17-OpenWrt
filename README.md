@@ -38,6 +38,10 @@ routing 和 UA3F 的提交固定在 `sources.env`。
 无线保持标准 OpenWrt 24.10 配置，不强制 160 MHz，也不修改校准、ART、EEPROM
 或其他无线相关受保护分区。
 
+本镜像按 IPv4-only 校园网络使用：LAN 不分配 IPv6 前缀，WAN6 和 LAN 的
+DHCPv6/RA/NDP 已停用，内核也默认关闭 IPv6。这样不会让自动生成的 WAN6
+路由绕过 UA3F 或 mwan3 的 IPv4 策略；需要 IPv6 的用户应另行构建配置。
+
 默认 LuCI 使用 Argon Dark，页脚包含作者链接：[番鼠大王](https://530555.xyz)。
 
 ## 构建和验证
@@ -104,6 +108,14 @@ mode-switch 指令。路由器只有一个 USB 端口；同时连接 F50 与打�
 先分别验证校园 WAN 与 USB WAN，再在 mwan3 中建立对应的接口、成员和策略。
 首版建议主 WAN 优先、USB 备用，测试拔线、恢复和 DNS。mwan3 安装后默认未
 启用自启动，完成真实上联配置后再启用服务。
+
+首次启动会把 `wan`、`wanb` 映射到 `mwan3` 中已经存在的逻辑接口，并使用
+`223.5.5.5`、`119.29.29.29`、`114.114.114.114` 作为 IPv4 探测目标，要求
+至少两个目标成功、连续失败 3 次才判定掉线。校园网若屏蔽公共 DNS，应把
+学校网关或可访问的校内 DNS 加到 `/etc/config/acrh17` 的
+`mwan3_probe_ip` 列表，然后重启 mwan3。`wan2`、`usbwan` 只作为可配置映射
+保留，不会凭空创建上联；在 LuCI 中建立实际接口后，再将它加入 mwan3 的成员
+和策略。`wan6` / `wanb6` 默认关闭。
 
 UA3F 在「服务 → UA3F」，保持完整上游 LuCI 界面，首次启动默认启用。
 它在本镜像中可使用 nftables TPROXY；对应 tproxy / queue 内核模块已包含。
@@ -174,8 +186,10 @@ F50 时另建 USB WAN 实例，不要默认同时运行多个实例。
 
 DDNS 页面和脚本已编译但默认关闭，不包含服务商、域名或账号。irqbalance 已
 启用并使用包自带的 procd/init 服务，适合 IPQ4019 的四核 CPU，不额外创建
-守护脚本。TurboACC 默认启用 BBR，软件 flow offloading 默认关闭；硬件 flow offloading、
-Shortcut-FE 和 FullCone 保持关闭，以降低与 UA3F、mwan3 策略路由冲突的概率。
+守护脚本。TurboACC 默认启用 BBR，软件和硬件 flow offloading、Shortcut-FE
+与 FullCone 均关闭。校园认证 / UA3F / mwan3 模式保持这个设置；只有在纯 NAT
+高吞吐场景下，才建议临时在 LuCI 中单独开启软件卸载并逐项验证，硬件卸载不作为
+默认方案。
 
 ## BBR 与 zram
 
@@ -191,10 +205,11 @@ BBR 调节路由器自身终止或发起的 TCP（包括代理连接），不会
 
 ## 默认网络、NTP 和 SmartDNS
 
-LAN 地址为 `192.168.5.1`。SmartDNS 监听本机 `6053`，dnsmasq 已配置为将 DNS
-请求转发到该端口；上游服务器和监听端口可通过 LuCI「服务 → SmartDNS」或
-`/etc/config/smartdns` 调整。该 LuCI 应用来自固定的 OpenWrt 24.10 LuCI
-提交，不依赖额外第三方 feed。
+LAN 地址为 `192.168.5.1`。SmartDNS 监听本机 `6053`，dnsmasq 优先将 DNS
+请求转发到该端口，同时保留腾讯 DNSPod 和阿里 DNS 的直连 IPv4 回退；SmartDNS
+停止、尚未启动或上游全部失败时，dnsmasq 仍可直接解析。上游服务器和监听端口
+可通过 LuCI「服务 → SmartDNS」或 `/etc/config/smartdns` 调整。该 LuCI 应用
+来自固定的 OpenWrt 24.10 LuCI 提交，不依赖额外第三方 feed。
 默认 SmartDNS 上游为腾讯 DNSPod（`119.29.29.29`、`119.28.28.28`）和阿里
 DNS（`223.5.5.5`、`223.6.6.6`）；SmartDNS 会在可用上游中选择响应更快的
 结果。默认 NTP 为阿里云、腾讯云和 `pool.ntp.org`。

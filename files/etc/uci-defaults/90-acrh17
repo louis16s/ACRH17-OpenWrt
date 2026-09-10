@@ -2,6 +2,16 @@
 # Only ordinary UCI settings. Preserve the upstream board/radio definitions.
 chmod 600 /etc/config/ruijie
 uci -q set network.lan.ipaddr='192.168.5.1'
+# IPv4-only operation: stop WAN6 and prevent LAN RA/DHCPv6 advertisements.
+uci -q set network.lan.ip6assign='0'
+if uci -q show network.wan6 >/dev/null 2>&1; then
+	uci -q set network.wan6.proto='none'
+	uci -q set network.wan6.auto='0'
+fi
+uci -q set dhcp.lan.dhcpv6='disabled'
+uci -q set dhcp.lan.ra='disabled'
+uci -q set dhcp.lan.ndp='disabled'
+uci -q set dhcp.lan.ra_flags='none'
 printf '%s\n%s\n' password password | passwd root
 uci -q set system.@system[0].hostname='DESKTOP-ACRH17'
 uci -q set system.@system[0].zonename='Asia/Shanghai'
@@ -11,10 +21,17 @@ uci -q add_list system.ntp.server='ntp.tencent.com'
 uci -q add_list system.ntp.server='pool.ntp.org'
 uci -q set luci.main.mediaurlbase='/luci-static/argon'
 uci -q set dhcp.@dnsmasq[0].noresolv='1'
+uci -q set dhcp.@dnsmasq[0].strictorder='1'
+uci -q delete dhcp.@dnsmasq[0].server
+# Prefer SmartDNS while healthy, but retain direct IPv4 fallbacks for boot and
+# captive-portal recovery when SmartDNS is stopped or not yet reachable.
 uci -q add_list dhcp.@dnsmasq[0].server='127.0.0.1#6053'
+uci -q add_list dhcp.@dnsmasq[0].server='223.5.5.5'
+uci -q add_list dhcp.@dnsmasq[0].server='119.29.29.29'
+uci -q add_list dhcp.@dnsmasq[0].server='114.114.114.114'
 uci -q set smartdns.@smartdns[0].enabled='1'
 uci -q set smartdns.@smartdns[0].port='6053'
-uci -q set smartdns.@smartdns[0].auto_set_dnsmasq='1'
+uci -q set smartdns.@smartdns[0].auto_set_dnsmasq='0'
 uci -q set smartdns.tencent_primary='server'
 uci -q set smartdns.tencent_primary.enabled='1'
 uci -q set smartdns.tencent_primary.type='udp'
@@ -44,6 +61,9 @@ uci -q commit smartdns
 uci -q commit ua3f
 /etc/init.d/smartdns enable
 /etc/init.d/smartdns start
+# Reload dnsmasq after SmartDNS is listening so it picks up the local resolver
+# and keeps the direct IPv4 servers as a runtime fallback.
+/etc/init.d/dnsmasq restart
 /etc/init.d/ua3f enable
 /etc/init.d/ua3f start
 
@@ -76,6 +96,28 @@ uci -q set system.@system[0].zram_size_mb='64'
 uci -q commit system
 # Services become active once their real uplinks / printer are configured in LuCI.
 uci -q set mwan3.globals.mmx_mask='0x3f000000'
+for msection in $(uci -q show acrh17.settings | sed -n "s/^acrh17.settings.mwan3_interface='\([^']*\)'$/\1/p"); do
+	# Only touch sections that already exist in the package/user mwan3 config.
+	# This leaves wan2/usbwan ready for LuCI without inventing a WAN.
+	if ! uci -q show mwan3."$msection" >/dev/null 2>&1; then
+		continue
+	fi
+	family="$(uci -q get mwan3."$msection".family)"
+	[ "$family" = ipv6 ] && continue
+	uci -q delete mwan3."$msection".track_ip
+	for target in $(uci -q show acrh17.settings | sed -n "s/^acrh17.settings.mwan3_probe_ip='\([^']*\)'$/\1/p"); do
+		uci -q add_list mwan3."$msection".track_ip="$target"
+	done
+	uci -q set mwan3."$msection".family='ipv4'
+	uci -q set mwan3."$msection".reliability='2'
+	uci -q set mwan3."$msection".timeout='2'
+	uci -q set mwan3."$msection".interval='5'
+	uci -q set mwan3."$msection".down='3'
+	uci -q set mwan3."$msection".up='3'
+done
+for msection in wan6 wanb6; do
+	uci -q set mwan3."$msection".enabled='0'
+done
 uci -q commit mwan3
 /etc/init.d/mwan3 disable
 uci -q set p910nd.@p910nd[0].enabled='0'
