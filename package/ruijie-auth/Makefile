@@ -52,6 +52,7 @@ define Package/ruijie-auth/install
 
 	$(INSTALL_DIR) $(1)/www/luci-static/resources/ruijie
 	$(INSTALL_DATA) ./files/www/luci-static/resources/ruijie/dashboard.css $(1)/www/luci-static/resources/ruijie/dashboard.css
+	$(INSTALL_DATA) ./files/www/luci-static/resources/ruijie/dashboard.js $(1)/www/luci-static/resources/ruijie/dashboard.js
 endef
 
 $(eval $(call BuildPackage,ruijie-auth))

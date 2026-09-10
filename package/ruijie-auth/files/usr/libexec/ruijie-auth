@@ -10,6 +10,17 @@ number() {
 	case "$1" in ''|*[!0-9]*) printf '%s' "$2";; *) printf '%s' "$1";; esac
 }
 
+wan_ready() {
+	wan="$(get wan_interface)"
+	case "$wan" in ''|*[!A-Za-z0-9_-]*) wan=wan;; esac
+	status_json="$(ubus call "network.interface.$wan" status 2>/dev/null)" || return 1
+	up="$(printf '%s' "$status_json" | jsonfilter -e '@.up' 2>/dev/null)"
+	case "$up" in 1|true) ;; *) return 1;; esac
+	ipv4="$(printf '%s' "$status_json" | jsonfilter -e '@["ipv4-address"][0].address' 2>/dev/null)"
+	case "$ipv4" in ''|0.0.0.0) return 1;; esac
+	return 0
+}
+
 save_state() {
 	state="$1"
 	result="$2"
@@ -36,6 +47,10 @@ request() {
 
 status() {
 	SERVER= COOKIE= REFERER=
+	# A captive portal check is only useful after the logical WAN is up and
+	# has an IPv4 lease. This avoids a 15s probe followed by another 15s login
+	# request while DHCP is still down.
+	wan_ready || { echo offline; return 1; }
 	CHECK_URL="$(get check_url)"
 	[ -n "$CHECK_URL" ] || CHECK_URL="http://connect.rom.miui.com/generate_204"
 	# No redirect following. A captive portal's 200/302 is not Internet access.
@@ -47,6 +62,11 @@ status() {
 
 portal() {
 	ACTION="$1"
+	if ! wan_ready; then
+		save_state authenticating pending 'WAN is not ready; waiting for IPv4 before portal request'
+		echo 'ERROR: WAN is not up or has no IPv4 address'
+		return 1
+	fi
 	SERVER="$(get server)"
 	PORTAL_PATH="$(get "${ACTION}_path")"
 	COOKIE="$(get cookie)"
@@ -134,10 +154,25 @@ daemon() {
 	[ "$RETRY" -ge 10 ] 2>/dev/null && [ "$RETRY" -le 3600 ] 2>/dev/null || RETRY=30
 	[ "$MAX_FAILURES" -ge 1 ] 2>/dev/null && [ "$MAX_FAILURES" -le 99 ] 2>/dev/null || MAX_FAILURES=3
 	FAILURES=0
-	[ "$(get boot_login)" = 1 ] && { save_state authenticating pending 'Boot authentication requested'; portal login >/dev/null 2>&1 || true; }
+	if [ "$(get boot_login)" = 1 ]; then
+		if wan_ready; then
+			save_state authenticating pending 'Boot authentication requested'
+			portal login >/dev/null 2>&1 || true
+		else
+			save_state authenticating pending 'WAN is not ready; waiting for IPv4 before boot authentication'
+		fi
+	fi
 	while true; do
 		if [ "$(get auto_reconnect)" != 1 ]; then
 			sleep "$INTERVAL"
+			continue
+		fi
+		# Do this before status() so DHCP-down periods do not incur two curl
+		# timeouts (connectivity probe plus portal login).
+		if ! wan_ready; then
+			save_state authenticating pending 'WAN is not ready; waiting for IPv4'
+			FAILURES=0
+			sleep "$RETRY"
 			continue
 		fi
 		if status >/dev/null 2>&1; then
@@ -152,14 +187,29 @@ daemon() {
 					case "$(get failure_action)" in
 						restart_wan) renew_wan || true;;
 						restart_service) /etc/init.d/ruijie-auth restart >/dev/null 2>&1 || true;;
+						retry) :;;
 					esac
-					FAILURES=0
+					# Keep the retry action at the capped delay. Recovery actions
+					# start a fresh backoff after they have been attempted.
+					[ "$(get failure_action)" = retry ] || FAILURES=0
 				fi
 			fi
 		fi
 		# Do not attach authentication headers to the next connectivity probe.
 		SERVER= COOKIE= REFERER=
-		sleep "$([ "$FAILURES" -gt 0 ] && printf '%s' "$RETRY" || printf '%s' "$INTERVAL")"
+		if [ "$FAILURES" -gt 0 ]; then
+			# With the default retry_interval=30 this is 30s, 45s, 60s,
+			# then 60s for subsequent failures. The value remains tunable.
+			case "$FAILURES" in
+				1) DELAY="$RETRY";;
+				2) DELAY=$((RETRY + (RETRY + 1) / 2));;
+				*) DELAY=$((RETRY * 2));;
+			esac
+			[ "$DELAY" -le 60 ] 2>/dev/null || DELAY=60
+		else
+			DELAY="$INTERVAL"
+		fi
+		sleep "$DELAY"
 	done
 }
 
