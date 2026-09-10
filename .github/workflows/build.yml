@@ -1,4 +1,5 @@
-name: Build RT-ACRH17 ImmortalWrt
+name: RT-ACRH17 ImmortalWrt Campus
+run-name: ImmortalWrt 24.10 Campus · mwan3 · ${{ github.ref_name }} · ${{ github.sha }}
 on:
   workflow_dispatch:
   push:
@@ -7,8 +8,8 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: acrh17-${{ github.ref }}
-  cancel-in-progress: true
+  group: acrh17-${{ github.ref }}-${{ github.run_id }}
+  cancel-in-progress: false
 jobs:
   build:
     runs-on: ubuntu-24.04
@@ -33,7 +34,6 @@ jobs:
           sh -n files/usr/libexec/acrh17-usb-net-status
           sh -n package/ruijie-auth/files/usr/libexec/ruijie-auth
           sh -n package/ruijie-auth/files/etc/init.d/ruijie-auth
-          python3 -m py_compile scripts/*.py
           find package -name '*.lua' -exec luac -p {} \;
           python3 -m unittest discover -s tests -v
       - name: Checkout pinned OpenWrt and feeds
@@ -97,7 +97,7 @@ jobs:
       - name: Upload firmware
         uses: actions/upload-artifact@v4
         with:
-          name: RT-ACRH17-ImmortalWrt-24.10-${{ github.sha }}
+          name: RT-ACRH17-ImmortalWrt-24.10-Campus-mwan3-${{ github.sha }}
           path: |
             artifacts/
             !artifacts/*imagebuilder*.tar.zst

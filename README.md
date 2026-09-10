@@ -113,8 +113,9 @@ mode-switch 指令。路由器只有一个 USB 端口；同时连接 F50 与打�
 首次启动会把 `wan`、`wanb` 映射到 `mwan3` 中已经存在的逻辑接口，并使用
 `223.5.5.5`、`119.29.29.29`、`114.114.114.114` 作为 IPv4 探测目标，要求
 至少两个目标成功、连续失败 3 次才判定掉线。校园网若屏蔽公共 DNS，应把
-学校网关或可访问的校内 DNS 加到 `/etc/config/acrh17` 的
-`mwan3_probe_ip` 列表，然后重启 mwan3。`wan2`、`usbwan` 只作为可配置映射
+在 LuCI 的对应 mwan3 接口中填写学校网关或可访问的校内 DNS 与公共 DNS。
+`/etc/config/acrh17` 的 `mwan3_probe_ip` 列表仅作为首次启动模板，修改它再重启 mwan3
+不会自动同步；运行期间应直接修改 mwan3 的 `track_ip`。`wan2`、`usbwan` 只作为可配置映射
 保留，不会凭空创建上联；在 LuCI 中建立实际接口后，再将它加入 mwan3 的成员
 和策略。`wan6` / `wanb6` 默认关闭。
 
@@ -249,7 +250,7 @@ RT-ACRH17 的 5 GHz 使用 QCA9984，官方 OpenWrt 24.10 设备定义使用
 
 ## 构建提速与稳定性
 
-同一分支的新完整构建会自动取消旧构建，两个系统的任务按分支隔离。纯 Markdown
+每次完整构建使用独立并发标识，保留已在运行的任务。纯 Markdown
 修改不触发完整编译。下载目录与 ccache 分开缓存；ccache 按系统分支、源码锁、
 配置和 runner 系统隔离，容量限制为 2 GiB。首次构建需建立缓存，实际提速以
 后续命中后的耗时为准。第三方源码按固定提交浅拉取。
@@ -267,3 +268,17 @@ SmartDNS；启用 mwan3 或代理重写时应先验证正常路径，再在实�
 
 Argon 通过 UCI `mode=dark` 强制暗色，64 MiB zram 配置持久化。锐捷页面将门户
 返回的认证结果与联网检查分开；HTTP 204 探测成功才记录已联网，注销记录为离线。
+
+## 版本命名与兼容性审查
+
+- `codex/openwrt-24.10`：OpenWrt Campus，原 main 分支，UA3F + mwan3 校园版。
+- `codex/immortalwrt-24.10`：ImmortalWrt Campus，UA3F + mwan3 校园版。
+- `codex/openwrt-24.10-singlewan`：OpenWrt Single WAN，UA3F 单上联版。
+
+本轮修复 UCI 多值列表读取、锐捷重复开机请求、接口绑定、认证操作互斥、
+LuCI 网关字段转义和折叠区域校验提示。包配置与成品 manifest 同时检查明确排除的包，
+并检查 libustream 提供者冲突。恢复重试通过行为测试验证。
+
+单上联版保留 UA3F、锐捷、SmartDNS、USB 网络、打印和原有维护工具，省去 mwan3
+及其 LuCI 页面。USB 上联仍可在网络接口页面配置；多出口的自动策略切换由校园版提供。
+所有版本的软件和硬件转发卸载默认关闭，实际吞吐和联合运行仍需实机验证。

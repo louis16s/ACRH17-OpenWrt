@@ -1,7 +1,9 @@
 """Exercise real HTTP encoding and captive-portal outcomes without a router."""
+import fcntl
 import http.server
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import tempfile
@@ -45,12 +47,22 @@ class PortalTests(unittest.TestCase):
         self.script.write_text(SCRIPT.read_text().replace('/tmp/ruijie-auth', str(p / 'ruijie-auth')))
         cfg = {'server': 'http://127.0.0.1:' + str(self.server.server_port), 'login_path': '/login', 'logout_path': '/logout', 'username': 'user & test', 'password_payload': '+/= encrypted payload', 'cookie': 'SESSION=a; other=b c', 'referer': 'http://example.test/a?b=c', 'query_string': 'a=b&c=d%20e'}
         cfg['check_url'] = cfg['server'] + '/probe'
+        cfg['interface'] = 'lo0' if os.uname().sysname == 'Darwin' else 'lo'
         self.env = dict(os.environ, PATH=str(p) + ':' + os.environ['PATH'], TEST_CONFIG=json.dumps(cfg))
         for name, source in {
             'uci': 'import os,json,sys; print(json.loads(os.environ["TEST_CONFIG"]).get(sys.argv[-1].split(".")[-1], ""))',
-            'ubus': 'print("{\\"up\\":true,\\"ipv4-address\\":[{\\"address\\":\\"192.0.2.2\\"}]}")',
-            'jsonfilter': 'import json,sys; data=json.load(open(sys.argv[sys.argv.index("-i")+1])) if "-i" in sys.argv else json.load(sys.stdin); expr=" ".join(sys.argv); print(data.get("result", "") if "-i" in sys.argv else (1 if "@.up" in expr and data.get("up") else data.get("ipv4-address", [{}])[0].get("address", "")))',
+            'ubus': 'import os; print(os.environ.get("TEST_WAN", \'{"up":true,"ipv4-address":[{"address":"192.0.2.2"}]}\'))',
+            'jsonfilter': '''import json,sys
+with open(sys.argv[sys.argv.index("-i")+1]) if "-i" in sys.argv else sys.stdin as stream:
+    data=json.load(stream)
+expr=sys.argv[sys.argv.index("-e")+1]
+if expr == "@.result": print(data.get("result", ""))
+elif expr == "@.up": print(str(data.get("up", False)).lower())
+elif expr == '@["ipv4-address"][0].address': print(next(iter(data.get("ipv4-address", [])), {}).get("address", ""))
+elif expr == "@.l3_device": print(data.get("l3_device", ""))
+''',
             'logger': 'pass',
+            **({'flock': 'import fcntl,sys; fcntl.flock(int(sys.argv[-1]), fcntl.LOCK_EX | fcntl.LOCK_NB)'} if not shutil.which('flock') else {}),
         }.items():
             f = p/name
             f.write_text('#!/usr/bin/env python3\n' + source + '\n')
@@ -115,3 +127,60 @@ class PortalTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('no IPv4', result.stdout)
         self.assertIsNone(Handler.received)
+
+    def test_up_without_ipv4_skips_http(self):
+        self.env['TEST_WAN'] = '{"up":true,"ipv4-address":[]}'
+        Handler.received = None
+        self.assertNotEqual(self.run_auth('login').returncode, 0)
+        self.assertIsNone(Handler.received)
+        self.assertEqual(self.run_auth('status').stdout.strip(), 'offline')
+
+
+    def test_parallel_authentication_is_rejected(self):
+        with open(Path(self.temp.name) / 'ruijie-auth.lock', 'w') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            Handler.received = None
+            result = self.run_auth('login')
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('already running', result.stdout)
+            self.assertIsNone(Handler.received)
+
+
+class RecoveryTests(unittest.TestCase):
+    def run_loop(self, overrides):
+        definitions = SCRIPT.read_text().rsplit('\ncase "$1" in', 1)[0]
+        return subprocess.run(['sh', '-c', definitions + '\n' + overrides + '\ndaemon'],
+                              capture_output=True, text=True, timeout=5)
+
+    def test_boot_failure_obeys_backoff(self):
+        result = self.run_loop('''get() {
+case "$1" in
+boot_login|auto_reconnect) echo 1;; retry_interval) echo 30;;
+check_interval) echo 60;; max_failures) echo 3;; failure_action) echo retry;;
+esac
+}
+wan_ready() { return 0; }
+status() { return 1; }
+portal() { return 1; }
+save_state() { :; }
+COUNT=0
+sleep() { echo "$1"; COUNT=$((COUNT+1)); [ "$COUNT" -lt 4 ] || exit 0; }
+''')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.split(), ['30', '45', '60', '60'])
+
+    def test_boot_auth_waits_for_dhcp_without_auto_reconnect(self):
+        result = self.run_loop('''get() {
+case "$1" in boot_login) echo 1;; auto_reconnect) echo 0;; esac
+}
+READY=0
+wan_ready() { [ "$READY" = 1 ]; }
+status() { return 1; }
+portal() { echo LOGIN >/dev/fd/3; return 0; }
+save_state() { :; }
+COUNT=0
+sleep() { echo "$1"; READY=1; COUNT=$((COUNT+1)); [ "$COUNT" -lt 2 ] || exit 0; }
+exec 3>&1
+''')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.split(), ['30', 'LOGIN', '60'])

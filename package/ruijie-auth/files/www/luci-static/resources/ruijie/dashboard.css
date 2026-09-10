@@ -107,7 +107,7 @@
 .ruijie-summary span { overflow-wrap: anywhere; color: #c7d5e8; font-size: .84rem; }
 
 .ruijie-manual-section {
-	border: 1px solid var(--ruijie-border);
+	border: 1px solid rgba(148, 163, 184, .2);
 	border-radius: 12px;
 	background: rgba(17, 27, 45, .5);
 }
@@ -120,3 +120,5 @@
 	.ruijie-cards { grid-template-columns: 1fr; }
 	.ruijie-summary { grid-template-columns: 1fr; gap: .35rem; }
 }
+
+.ruijie-manual-section .cbi-section-node[hidden] { display: none !important; }

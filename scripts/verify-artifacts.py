@@ -22,3 +22,8 @@ assert not required - packages, 'Missing packages: ' + str(required - packages)
 for name in packages:
     assert not any(x in name.lower() for x in ['clash', 'adguard', 'samba', 'docker']), name
 print('Firmware manifest contains every required package')
+
+for line in Path('configs/acrh17.config').read_text().splitlines():
+    if line.startswith('# CONFIG_PACKAGE_') and line.endswith(' is not set') and '_INCLUDE_' not in line:
+        name = line.split('CONFIG_PACKAGE_', 1)[1].split()[0]
+        assert name not in packages, 'Excluded package installed: ' + name
