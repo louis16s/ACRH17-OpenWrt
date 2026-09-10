@@ -1,8 +1,10 @@
-# ASUS RT-ACRH17 · ImmortalWrt 24.10 试验分支
+# ASUS RT-ACRH17 · ImmortalWrt 24.10 Single WAN
 
 此分支使用 ImmortalWrt 的 `openwrt-24.10` 源码、`ipq40xx/generic` →
 `asus_rt-ac42u` 设备定义，并继承主线功能配置。ImmortalWrt、packages、LuCI、
 routing 和 UA3F 的提交固定在 `sources.env`。
+这是单上联版本，未编译 `mwan3` 及其 LuCI 页面；UA3F、锐捷、USB 网络、SmartDNS、
+打印和其余维护工具保留。需要双 WAN 时请使用 `codex/immortalwrt-24.10`。
 
 ## 功能与体积
 
@@ -11,7 +13,7 @@ routing 和 UA3F 的提交固定在 `sources.env`。
 | LuCI HTTPS、中文、Argon Dark 主题 | `luci-ssl`、`luci-app-package-manager`、`luci-theme-argon`、`LUCI_LANG_zh_Hans` |
 | UA3F 图形管理 | UA3F v3.6.0 系列的 `ua3f` 包自带 Lua LuCI，锁定官方最新提交 `7a3869714df6...`；保留 `luci-compat`，首次启动即启用 |
 | 锐捷 ePortal | 自定义 `ruijie-auth`、curl、jsonfilter，LuCI 配置及手动登录/注销 |
-| 双 WAN | `mwan3`、`luci-app-mwan3`、legacy iptables/ip6tables、ipset；系统防火墙为 firewall4 |
+| 单 WAN | 使用 OpenWrt firewall4 和 LuCI 网络接口配置一个活动上联，不包含 mwan3 |
 | Android / USB 网卡 / F50 | RNDIS、CDC Ethernet、CDC NCM 驱动 |
 | MBIM 备用支持 | `kmod-usb-net-cdc-mbim`、`umbim`、`luci-proto-mbim`，自动带入 WDM |
 | USB 打印 | `kmod-usb-printer`、`p910nd`、`luci-app-p910nd` |
@@ -273,6 +275,7 @@ Argon 通过 UCI `mode=dark` 强制暗色，64 MiB zram 配置持久化。锐捷
 
 - `codex/openwrt-24.10`：OpenWrt Campus，原 main 分支，UA3F + mwan3 校园版。
 - `codex/immortalwrt-24.10`：ImmortalWrt Campus，UA3F + mwan3 校园版。
+- `codex/immortalwrt-24.10-singlewan`：ImmortalWrt Single WAN，UA3F 单上联版。
 - `codex/openwrt-24.10-singlewan`：OpenWrt Single WAN，UA3F 单上联版。
 
 本轮修复 UCI 多值列表读取、锐捷重复开机请求、接口绑定、认证操作互斥、
