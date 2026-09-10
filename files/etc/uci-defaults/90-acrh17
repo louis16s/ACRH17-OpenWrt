@@ -12,6 +12,7 @@ uci -q set dhcp.lan.dhcpv6='disabled'
 uci -q set dhcp.lan.ra='disabled'
 uci -q set dhcp.lan.ndp='disabled'
 uci -q set dhcp.lan.ra_flags='none'
+uci -q set firewall.@defaults[0].disable_ipv6='1'
 printf '%s\n%s\n' password password | passwd root
 uci -q set system.@system[0].hostname='DESKTOP-ACRH17'
 uci -q set system.@system[0].zonename='Asia/Shanghai'
@@ -57,6 +58,7 @@ uci -q commit network
 uci -q commit system
 uci -q commit luci
 uci -q commit dhcp
+uci -q commit firewall
 uci -q commit smartdns
 uci -q commit ua3f
 /etc/init.d/smartdns enable
@@ -64,6 +66,7 @@ uci -q commit ua3f
 # Reload dnsmasq after SmartDNS is listening so it picks up the local resolver
 # and keeps the direct IPv4 servers as a runtime fallback.
 /etc/init.d/dnsmasq restart
+/etc/init.d/firewall reload
 /etc/init.d/ua3f enable
 /etc/init.d/ua3f start
 

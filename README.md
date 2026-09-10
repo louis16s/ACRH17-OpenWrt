@@ -39,8 +39,9 @@ routing 和 UA3F 的提交固定在 `sources.env`。
 或其他无线相关受保护分区。
 
 本镜像按 IPv4-only 校园网络使用：LAN 不分配 IPv6 前缀，WAN6 和 LAN 的
-DHCPv6/RA/NDP 已停用，内核也默认关闭 IPv6。这样不会让自动生成的 WAN6
-路由绕过 UA3F 或 mwan3 的 IPv4 策略；需要 IPv6 的用户应另行构建配置。
+DHCPv6/RA/NDP 和 firewall4 的 IPv6 处理已停用，内核也默认关闭 IPv6。这样
+不会让自动生成的 WAN6 路由绕过 UA3F 或 mwan3 的 IPv4 策略；需要 IPv6 的用户
+应另行构建配置。
 
 默认 LuCI 使用 Argon Dark，页脚包含作者链接：[番鼠大王](https://530555.xyz)。
 
