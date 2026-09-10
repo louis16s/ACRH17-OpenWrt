@@ -1,6 +1,9 @@
-# ASUS RT-ACRH17 · OpenWrt 24.10
+# ASUS RT-ACRH17 · OpenWrt 24.10 Single WAN
 
-面向 OpBoot 的第一版固件构建项目。使用官方 `ipq40xx/generic` →
+当前分支为单上联版本：UA3F、锐捷、USB WAN 与打印功能保留，mwan3 和其 LuCI 页面不编译。
+下文双 WAN 章节用于说明 Campus 版本；当前版本通过 LuCI 网络接口配置单个活动上联。
+
+面向 OpBoot 的固件构建项目。使用官方 `ipq40xx/generic` →
 `asus_rt-ac42u` 定义，OpenWrt 分支为 `openwrt-24.10`。
 OpenWrt、packages、LuCI、routing 和 UA3F 的提交固定在 `sources.env`。
 

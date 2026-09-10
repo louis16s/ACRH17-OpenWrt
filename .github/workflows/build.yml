@@ -1,5 +1,5 @@
-name: RT-ACRH17 OpenWrt Campus
-run-name: OpenWrt 24.10 Campus · mwan3 · ${{ github.ref_name }} · ${{ github.sha }}
+name: RT-ACRH17 OpenWrt Single WAN
+run-name: OpenWrt 24.10 Single WAN · UA3F · ${{ github.ref_name }} · ${{ github.sha }}
 on:
   workflow_dispatch:
   push:
@@ -97,7 +97,7 @@ jobs:
       - name: Upload firmware
         uses: actions/upload-artifact@v4
         with:
-          name: RT-ACRH17-OpenWrt-24.10-Campus-mwan3-${{ github.sha }}
+          name: RT-ACRH17-OpenWrt-24.10-SingleWAN-UA3F-${{ github.sha }}
           path: |
             artifacts/
             !artifacts/*imagebuilder*.tar.zst
