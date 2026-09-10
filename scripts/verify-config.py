@@ -17,4 +17,10 @@ required = [
 missing = [x for x in required if x not in resolved]
 if missing:
     raise SystemExit('Required config symbols dropped: ' + ', '.join(missing))
+
+# libustream has one shared soname, so both LuCI SSL collections cannot be
+# installed in the same image.  ImmortalWrt profiles can select the OpenSSL
+# collection by default even when the project asks for the mbedTLS one.
+if 'CONFIG_PACKAGE_luci-ssl=y' in resolved and 'CONFIG_PACKAGE_luci-ssl-openssl=y' in resolved:
+    raise SystemExit('Conflicting LuCI SSL providers selected: luci-ssl and luci-ssl-openssl')
 print('All requested features survived make defconfig')

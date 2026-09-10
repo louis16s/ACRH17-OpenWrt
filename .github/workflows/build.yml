@@ -73,10 +73,12 @@ jobs:
       - name: Download sources
         working-directory: openwrt
         run: |
+          set -o pipefail
           make download -j8 2>&1 | tee ../logs/download.log
       - name: Compile firmware
         working-directory: openwrt
         run: |
+          set -o pipefail
           set +e
           make -j"$(nproc)" V=s 2>&1 | tee ../logs/build.log
           result=${PIPESTATUS[0]}
