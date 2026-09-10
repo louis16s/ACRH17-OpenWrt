@@ -33,6 +33,7 @@ jobs:
           sh -n files/usr/libexec/acrh17-usb-net-status
           sh -n package/ruijie-auth/files/usr/libexec/ruijie-auth
           sh -n package/ruijie-auth/files/etc/init.d/ruijie-auth
+          python3 -m py_compile scripts/*.py
           find package -name '*.lua' -exec luac -p {} \;
           python3 -m unittest discover -s tests -v
       - name: Checkout pinned OpenWrt and feeds

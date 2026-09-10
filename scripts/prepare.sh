@@ -4,6 +4,12 @@ set -eu
 PROJECT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 . "$PROJECT/sources.env"
 [ -f include/toplevel.mk ] || { echo 'Run inside an OpenWrt source tree' >&2; exit 1; }
+# ImmortalWrt's target defaults include libustream-openssl, while the shared
+# project configuration uses LuCI's lighter mbedTLS collection.  Keep one
+# provider so package/install cannot place two libustream-ssl.so files.
+case "$OPENWRT_REPOSITORY" in
+ *immortalwrt*) python3 "$PROJECT/scripts/patch-immortal-ssl-default.py" include/target.mk ;;
+esac
 [ ! -e package/UA3F ] || { echo 'UA3F directory already exists' >&2; exit 1; }
 fetch_source() {
  git init "$3"
