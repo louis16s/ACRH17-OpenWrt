@@ -9,7 +9,7 @@ OpenWrt、packages、LuCI、routing 和 UA3F 的提交固定在 `sources.env`。
 | 功能 | 包 / 实现 |
 | --- | --- |
 | LuCI HTTPS、中文、Argon Dark 主题 | `luci-ssl`、`luci-app-package-manager`、`luci-theme-argon`、`LUCI_LANG_zh_Hans` |
-| UA3F 图形管理 | UA3F v3.6.0 的 `ua3f` 包自带 Lua LuCI，保留 `luci-compat`；首次启动即启用 |
+| UA3F 图形管理 | UA3F v3.6.0 系列的 `ua3f` 包自带 Lua LuCI，锁定官方最新提交 `7a3869714df6...`；保留 `luci-compat`，首次启动即启用 |
 | 锐捷 ePortal | 自定义 `ruijie-auth`、curl、jsonfilter，LuCI 配置及手动登录/注销 |
 | 双 WAN | `mwan3`、`luci-app-mwan3`、legacy iptables/ip6tables、ipset；系统防火墙为 firewall4 |
 | Android / USB 网卡 / F50 | RNDIS、CDC Ethernet、CDC NCM 驱动 |
@@ -119,6 +119,9 @@ mode-switch 指令。路由器只有一个 USB 端口；同时连接 F50 与打�
 和策略。`wan6` / `wanb6` 默认关闭。
 
 UA3F 在「服务 → UA3F」，保持完整上游 LuCI 界面，首次启动默认启用。
+`sources.env` 锁定官方最新未发布提交 `7a3869714df6b46af7b1a52287e6560d4bfbd6ba`。
+该提交修正 Desync 参数含义并增加可配置 TTL 值；本项目仍保持重排和 TTL 默认关闭，
+因此升级提交不会改变现有默认行为。正式 Release 仍为 v3.6.0。
 它在本镜像中可使用 nftables TPROXY；对应 tproxy / queue 内核模块已包含。
 构建补丁补齐 `luci-base/host` 的 po2lmo 依赖和 Build/Prepare 目录创建。
 
@@ -172,8 +175,12 @@ p910nd 不提供渲染驱动，也不保证所有仅支持专有协议的打印�
 状态。登录、注销、重新认证、按需 DHCP 更新、清除结果和服务重启均在后台
 执行，避免 LuCI 因门户超时而卡住；最近日志仅从 RAM 中的 `logread` 读取 80 行。
 
-自动恢复支持开机认证、断线重认证、检测及重试间隔、最大失败次数，以及仅重试、
+自动恢复支持开机认证、断线重认证、检测及失败重试起始间隔、最大失败次数，以及仅重试、
 重启 WAN 逻辑接口或重启认证服务三种失败动作。默认不会重启整台路由器。
+认证请求前会先检查 WAN 逻辑接口是否 up 且已获得 IPv4；DHCP 未就绪时仅等待，
+不会先执行联网探测再执行门户请求。认证失败采用有限退避：默认从 30 秒开始，
+依次为 45 秒、60 秒，之后保持 60 秒；达到配置的最大连续失败次数后，只有重启
+WAN 或重启服务动作会清零退避，选择“仅继续重试”会保持封顶间隔。
 
 「系统 → 自定义命令」预置重新认证锐捷、重启 UA3F、重拨 UCI 中配置的 USB
 WAN、重启 p910nd、查看 USB 设备及查看 USB 网络驱动状态。USB WAN 默认逻辑
@@ -210,7 +217,9 @@ LAN 地址为 `192.168.5.1`。SmartDNS 监听本机 `6053`，dnsmasq 优先将 D
 请求转发到该端口，同时保留腾讯 DNSPod 和阿里 DNS 的直连 IPv4 回退；SmartDNS
 停止、尚未启动或上游全部失败时，dnsmasq 仍可直接解析。上游服务器和监听端口
 可通过 LuCI「服务 → SmartDNS」或 `/etc/config/smartdns` 调整。该 LuCI 应用
-来自固定的 OpenWrt 24.10 LuCI 提交，不依赖额外第三方 feed。
+来自固定的 OpenWrt 24.10 LuCI 提交，不依赖额外第三方 feed。`prefetch` 与
+`serve_expired` 保持可选，建议先观察校园 DNS 对过期缓存的接受情况，再按需启用，
+不默认增大缓存。
 默认 SmartDNS 上游为腾讯 DNSPod（`119.29.29.29`、`119.28.28.28`）和阿里
 DNS（`223.5.5.5`、`223.6.6.6`）；SmartDNS 会在可用上游中选择响应更快的
 结果。默认 NTP 为阿里云、腾讯云和 `pool.ntp.org`。
@@ -235,7 +244,8 @@ RT-ACRH17 的 5 GHz 使用 QCA9984，官方 OpenWrt 24.10 设备定义使用
 - [OpenWrt 24.10 USB 模块定义](https://github.com/openwrt/openwrt/blob/a1ea57bd050c172fdc2b851824ebd9782aafb055/package/kernel/linux/modules/usb.mk)
 - [mwan3 包和源代码](https://github.com/openwrt/packages/tree/4b4b1f5af9d7aec892ec9148aaccd88590d83982/net/mwan3)
 - [p910nd 包和默认配置](https://github.com/openwrt/packages/tree/4b4b1f5af9d7aec892ec9148aaccd88590d83982/net/p910nd)
-- [UA3F v3.6.0](https://github.com/SunBK201/UA3F/releases/tag/v3.6.0)
+- [UA3F v3.6.0 最新正式 Release](https://github.com/SunBK201/UA3F/releases/tag/v3.6.0)
+- [UA3F 锁定提交 7a386971](https://github.com/SunBK201/UA3F/commit/7a3869714df6b46af7b1a52287e6560d4bfbd6ba)
 
 ## 构建提速与稳定性
 

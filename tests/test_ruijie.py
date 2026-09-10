@@ -48,7 +48,8 @@ class PortalTests(unittest.TestCase):
         self.env = dict(os.environ, PATH=str(p) + ':' + os.environ['PATH'], TEST_CONFIG=json.dumps(cfg))
         for name, source in {
             'uci': 'import os,json,sys; print(json.loads(os.environ["TEST_CONFIG"]).get(sys.argv[-1].split(".")[-1], ""))',
-            'jsonfilter': 'import json,sys; print(json.load(open(sys.argv[sys.argv.index("-i")+1])).get("result", ""))',
+            'ubus': 'print("{\\"up\\":true,\\"ipv4-address\\":[{\\"address\\":\\"192.0.2.2\\"}]}")',
+            'jsonfilter': 'import json,sys; data=json.load(open(sys.argv[sys.argv.index("-i")+1])) if "-i" in sys.argv else json.load(sys.stdin); expr=" ".join(sys.argv); print(data.get("result", "") if "-i" in sys.argv else (1 if "@.up" in expr and data.get("up") else data.get("ipv4-address", [{}])[0].get("address", "")))',
             'logger': 'pass',
         }.items():
             f = p/name
@@ -103,3 +104,14 @@ class PortalTests(unittest.TestCase):
         cfg['server'] = 'file:///etc/passwd'
         self.env['TEST_CONFIG'] = json.dumps(cfg)
         self.assertNotEqual(self.run_auth('login').returncode, 0)
+
+    def test_wan_precheck_skips_portal_request(self):
+        (Path(self.temp.name) / 'ubus').write_text(
+            '#!/usr/bin/env python3\nprint("{\\"up\\":false,\\"ipv4-address\\":[]}")\n'
+        )
+        (Path(self.temp.name) / 'ubus').chmod(0o755)
+        Handler.received = None
+        result = self.run_auth('login')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('no IPv4', result.stdout)
+        self.assertIsNone(Handler.received)

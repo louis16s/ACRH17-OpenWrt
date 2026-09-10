@@ -71,7 +71,8 @@ o = recovery:option(Flag, "enabled", translate("启用锐捷认证服务")); o.d
 o = recovery:option(Flag, "boot_login", translate("开机自动认证")); o.default = 1
 o = recovery:option(Flag, "auto_reconnect", translate("断线自动重新认证")); o.default = 1
 o = recovery:option(Value, "check_interval", translate("检测间隔（秒）")); o.datatype = "range(15,3600)"; o.default = "60"
-o = recovery:option(Value, "retry_interval", translate("失败重试间隔（秒）")); o.datatype = "range(10,3600)"; o.default = "30"
+o = recovery:option(Value, "retry_interval", translate("失败重试起始间隔（秒）")); o.datatype = "range(10,3600)"; o.default = "30"
+o.description = translate("连续失败时按起始值、1.5 倍、2 倍退避并封顶 60 秒；默认序列为 30、45、60、60 秒。")
 o = recovery:option(Value, "max_failures", translate("最大连续失败次数")); o.datatype = "range(1,99)"; o.default = "3"
 o = recovery:option(ListValue, "failure_action", translate("连续失败后的动作"))
 o:value("retry", translate("仅继续重试")); o:value("restart_wan", translate("重启 WAN 接口")); o:value("restart_service", translate("重启锐捷认证服务")); o.default = "retry"
