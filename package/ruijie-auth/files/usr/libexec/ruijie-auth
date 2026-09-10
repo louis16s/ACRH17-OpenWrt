@@ -36,6 +36,11 @@ save_state() {
 
 request() {
 	DEVICE="$(get interface)"
+	if [ -z "$DEVICE" ]; then
+		wan_ready || return 1
+		DEVICE="$(printf '%s' "$status_json" | jsonfilter -e '@.l3_device' 2>/dev/null)"
+		[ -n "$DEVICE" ] || return 1
+	fi
 	[ -z "$DEVICE" ] || set -- --interface "$DEVICE" "$@"
 	[ -z "$COOKIE" ] || set -- -H "Cookie: $COOKIE" "$@"
 	[ -z "$REFERER" ] || set -- --referer "$REFERER" "$@"
@@ -60,7 +65,16 @@ status() {
 	return 1
 }
 
-portal() {
+# Serialize manual actions with the existing daemon; flock releases on crash.
+with_lock() (
+	flock -n 9 || { echo 'Authentication action already running'; return 1; }
+	"$@"
+) 9>/tmp/ruijie-auth.lock
+
+portal() { with_lock portal_request "$@"; }
+reauth() { with_lock reauth_request; }
+
+portal_request() {
 	ACTION="$1"
 	if ! wan_ready; then
 		save_state authenticating pending 'WAN is not ready; waiting for IPv4 before portal request'
@@ -121,7 +135,7 @@ portal() {
 
 renew_wan() {
 	wan="$(get wan_interface)"
-	[ -n "$wan" ] || wan=wan
+	case "$wan" in ''|*[!A-Za-z0-9_-]*) echo "Invalid WAN interface"; return 1;; esac
 	if ifdown "$wan" >/dev/null 2>&1 && sleep 2 && ifup "$wan" >/dev/null 2>&1; then
 		save_state authenticating pending "WAN DHCP renewed on $wan"
 		logger -t ruijie-auth "wan-renew interface=$wan rc=0"
@@ -132,12 +146,12 @@ renew_wan() {
 	return 1
 }
 
-reauth() {
+reauth_request() {
 	save_state authenticating pending 'Reauthentication requested'
-	portal logout >/dev/null 2>&1 || true
+	portal_request logout >/dev/null 2>&1 || true
 	sleep 2
 	[ "$(get renew_dhcp_on_reauth)" = 1 ] && renew_wan || true
-	portal login
+	portal_request login
 }
 
 clear_results() {
@@ -151,19 +165,12 @@ daemon() {
 	RETRY="$(number "$(get retry_interval)" 30)"
 	MAX_FAILURES="$(number "$(get max_failures)" 3)"
 	[ "$INTERVAL" -ge 15 ] 2>/dev/null && [ "$INTERVAL" -le 3600 ] 2>/dev/null || INTERVAL=60
-	[ "$RETRY" -ge 10 ] 2>/dev/null && [ "$RETRY" -le 3600 ] 2>/dev/null || RETRY=30
+	[ "$RETRY" -ge 10 ] 2>/dev/null && [ "$RETRY" -le 60 ] 2>/dev/null || RETRY=30
 	[ "$MAX_FAILURES" -ge 1 ] 2>/dev/null && [ "$MAX_FAILURES" -le 99 ] 2>/dev/null || MAX_FAILURES=3
 	FAILURES=0
-	if [ "$(get boot_login)" = 1 ]; then
-		if wan_ready; then
-			save_state authenticating pending 'Boot authentication requested'
-			portal login >/dev/null 2>&1 || true
-		else
-			save_state authenticating pending 'WAN is not ready; waiting for IPv4 before boot authentication'
-		fi
-	fi
+	BOOT_PENDING="$(get boot_login)"
 	while true; do
-		if [ "$(get auto_reconnect)" != 1 ]; then
+		if [ "$BOOT_PENDING" != 1 ] && [ "$(get auto_reconnect)" != 1 ]; then
 			sleep "$INTERVAL"
 			continue
 		fi
@@ -175,6 +182,7 @@ daemon() {
 			sleep "$RETRY"
 			continue
 		fi
+		BOOT_PENDING=0
 		if status >/dev/null 2>&1; then
 			FAILURES=0
 		else
@@ -182,11 +190,14 @@ daemon() {
 			if portal login >/dev/null 2>&1; then
 				FAILURES=0
 			else
-				FAILURES=$((FAILURES + 1))
+				[ "$FAILURES" -ge 99 ] || FAILURES=$((FAILURES + 1))
 				if [ "$FAILURES" -ge "$MAX_FAILURES" ]; then
 					case "$(get failure_action)" in
 						restart_wan) renew_wan || true;;
-						restart_service) /etc/init.d/ruijie-auth restart >/dev/null 2>&1 || true;;
+						restart_service)
+							# Restart the managed process after cooling down; keep its PID.
+							sleep 60
+							exec "$0" daemon;;
 						retry) :;;
 					esac
 					# Keep the retry action at the capped delay. Recovery actions

@@ -98,8 +98,9 @@ uci -q commit argon
 uci -q set system.@system[0].zram_size_mb='64'
 uci -q commit system
 # Services become active once their real uplinks / printer are configured in LuCI.
+if [ -x /etc/init.d/mwan3 ]; then
 uci -q set mwan3.globals.mmx_mask='0x3f000000'
-for msection in $(uci -q show acrh17.settings | sed -n "s/^acrh17.settings.mwan3_interface='\([^']*\)'$/\1/p"); do
+for msection in $(uci -q get acrh17.settings.mwan3_interface); do
 	# Only touch sections that already exist in the package/user mwan3 config.
 	# This leaves wan2/usbwan ready for LuCI without inventing a WAN.
 	if ! uci -q show mwan3."$msection" >/dev/null 2>&1; then
@@ -108,7 +109,7 @@ for msection in $(uci -q show acrh17.settings | sed -n "s/^acrh17.settings.mwan3
 	family="$(uci -q get mwan3."$msection".family)"
 	[ "$family" = ipv6 ] && continue
 	uci -q delete mwan3."$msection".track_ip
-	for target in $(uci -q show acrh17.settings | sed -n "s/^acrh17.settings.mwan3_probe_ip='\([^']*\)'$/\1/p"); do
+	for target in $(uci -q get acrh17.settings.mwan3_probe_ip); do
 		uci -q add_list mwan3."$msection".track_ip="$target"
 	done
 	uci -q set mwan3."$msection".family='ipv4'
@@ -123,6 +124,7 @@ for msection in wan6 wanb6; do
 done
 uci -q commit mwan3
 /etc/init.d/mwan3 disable
+fi
 uci -q set p910nd.@p910nd[0].enabled='0'
 uci -q commit p910nd
 /etc/init.d/watchcat disable

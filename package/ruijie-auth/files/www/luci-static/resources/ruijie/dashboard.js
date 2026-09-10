@@ -31,6 +31,12 @@
 				parent.querySelector('.cbi-section-node').hidden = open;
 			});
 			section.insertBefore(toggle, node);
+			if (section.querySelector('.cbi-value-error, .cbi-input-invalid')) toggle.click();
+			node.addEventListener('invalid', function () {
+				var parent = this.closest('.ruijie-manual-section');
+				var button = parent.querySelector('.ruijie-manual-toggle');
+				if (button.getAttribute('aria-expanded') === 'false') button.click();
+			}, true);
 		}
 	}
 

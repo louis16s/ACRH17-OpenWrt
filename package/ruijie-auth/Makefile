@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=ruijie-auth
 PKG_VERSION:=1.1.0
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 
 PKGARCH:=all
 
@@ -12,7 +12,7 @@ define Package/ruijie-auth
   SECTION:=net
   CATEGORY:=Network
   TITLE:=Ruijie ePortal authentication helper with LuCI
-  DEPENDS:=+curl +ca-bundle +jsonfilter +luci-compat
+  DEPENDS:=+curl +ca-bundle +jsonfilter +flock +luci-compat
 endef
 
 define Package/ruijie-auth/description

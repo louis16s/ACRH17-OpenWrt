@@ -3,6 +3,11 @@
 iface="$(uci -q get acrh17.settings.usbwan_interface)"
 [ -n "$iface" ] || iface=usbwan
 
+campus="$(uci -q get ruijie.main.wan_interface)"
+[ -n "$campus" ] || campus=wan
+case "$iface" in ''|*[!A-Za-z0-9_-]*) echo 'Invalid USB WAN interface'; exit 1;; esac
+[ "$iface" != "$campus" ] || { echo 'USB WAN must differ from campus WAN'; exit 1; }
+uci -q get "network.$iface" >/dev/null || { echo 'USB WAN is not configured'; exit 1; }
 ifdown "$iface" || exit 1
 sleep 2
 ifup "$iface"

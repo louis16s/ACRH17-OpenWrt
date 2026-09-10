@@ -38,7 +38,7 @@ display("service", translate("服务状态"), function() return sys.call("/etc/i
 display("auth", translate("当前认证状态"), function() return ({ online = translate("已联网"), authenticating = translate("正在认证"), failed = translate("认证失败") })[state("auth_state")] or translate("未联网") end)
 display("wan", translate("WAN 接口"), wan_name)
 display("ipv4", translate("WAN IPv4 地址"), wan_ipv4)
-display("gateway", translate("默认网关"), function() return trim(sys.exec("ip -4 route show default 2>/dev/null | sed -n '1s/.* via \([^ ]*\).*/\1/p'")) end)
+display("gateway", translate("默认网关"), function() return trim(sys.exec("ubus call network.interface." .. wan_name() .. " status 2>/dev/null | jsonfilter -e '@.route[@.target=\"0.0.0.0\"].nexthop' | head -n 1")) end)
 display("last_time", translate("最近认证时间"), function() return state("last_time") end)
 display("last_result", translate("最近一次认证结果"), function() return state("last_result") end)
 display("last_summary", translate("最近认证返回内容摘要"), function() return state("last_summary") end)
@@ -54,7 +54,7 @@ local function action(name, title, command, style)
 	local button = actions:option(Button, name, title)
 	button.inputstyle = style or "apply"
 	function button.write()
-		sys.call("(printf 'result=running\\n' >/tmp/ruijie-auth.action; " .. command .. " >>/tmp/ruijie-auth.action 2>&1; rc=$?; [ $rc -eq 0 ] && printf 'result=success\\n' >>/tmp/ruijie-auth.action || printf 'result=failed\\n' >>/tmp/ruijie-auth.action; logger -t ruijie-auth 'LuCI action completed') &")
+		sys.call("(umask 077; printf 'result=running\\n' >/tmp/ruijie-auth.action; " .. command .. " >>/tmp/ruijie-auth.action 2>&1; rc=$?; [ $rc -eq 0 ] && printf 'result=success\\n' >>/tmp/ruijie-auth.action || printf 'result=failed\\n' >>/tmp/ruijie-auth.action; logger -t ruijie-auth 'LuCI action completed') &")
 		m.message = translate("操作已提交。认证请求在后台以短超时执行；刷新页面可查看明确结果。")
 	end
 end
@@ -71,7 +71,7 @@ o = recovery:option(Flag, "enabled", translate("启用锐捷认证服务")); o.d
 o = recovery:option(Flag, "boot_login", translate("开机自动认证")); o.default = 1
 o = recovery:option(Flag, "auto_reconnect", translate("断线自动重新认证")); o.default = 1
 o = recovery:option(Value, "check_interval", translate("检测间隔（秒）")); o.datatype = "range(15,3600)"; o.default = "60"
-o = recovery:option(Value, "retry_interval", translate("失败重试起始间隔（秒）")); o.datatype = "range(10,3600)"; o.default = "30"
+o = recovery:option(Value, "retry_interval", translate("失败重试起始间隔（秒）")); o.datatype = "range(10,60)"; o.default = "30"
 o.description = translate("连续失败时按起始值、1.5 倍、2 倍退避并封顶 60 秒；默认序列为 30、45、60、60 秒。")
 o = recovery:option(Value, "max_failures", translate("最大连续失败次数")); o.datatype = "range(1,99)"; o.default = "3"
 o = recovery:option(ListValue, "failure_action", translate("连续失败后的动作"))
