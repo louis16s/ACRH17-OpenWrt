@@ -13,7 +13,7 @@
 | 锐捷手工 / 后台操作 | 使用 flock 串行化门户登录、注销和重新认证；增加明确的 flock 包依赖；操作结果按 0600 创建 |
 | LuCI 兼容 | 保留 luci-compat；网关查询改用校园 WAN 的 ubus 路由数据；修复折叠隐藏与校验错误展开行为；Lua 5.1 编译语法检查 |
 | USB WAN / 校园 WAN | 重拨前检查逻辑接口存在，并拒绝校园接口名，避免误断主 WAN |
-| SmartDNS / dnsmasq | 保留 6053 / 53 端口分工与直连 DNS 回退；实际超时回退延迟取决于上游和 dnsmasq，不能保证即时切换 |
+| SmartDNS / dnsmasq | 保留 6053 / 53 端口分工与直连 DNS 回退；监听和双栈选择明确设为 IPv4-only；实际超时回退延迟取决于上游和 dnsmasq，不能保证即时切换 |
 | TurboACC / UA3F | 保留软件、硬件、SFE、FullCone 默认关闭；BBR、irqbalance、zram 使用原有实现 |
 | TurboACC 可选依赖 | 构建前移除 24.10 feed 中不存在的 Shortcut-FE / NFT FullCone 依赖和菜单项；修复 Makefile 续行，避免把 `=all` 误解析成依赖；保留可用的 flow offload 与 BBR CCA |
 | feeds / 构建缓存 | 跳过缺少 `rpcd-mod-rad3-enc` 的未使用 `luci-app-radicale3` feed 链接；下载目录和 ccache 使用稳定键，后续矩阵构建可直接复用 |

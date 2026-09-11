@@ -7,6 +7,12 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 
 class DefaultsTests(unittest.TestCase):
+    def test_smartdns_is_enabled_on_ipv4_only_listener(self):
+        text = (ROOT / 'files/etc/uci-defaults/90-acrh17').read_text()
+        self.assertIn("uci -q set smartdns.@smartdns[0].enabled='1'", text)
+        self.assertIn("uci -q set smartdns.@smartdns[0].port='6053'", text)
+        self.assertIn("uci -q set smartdns.@smartdns[0].ipv6_server='0'", text)
+
     def test_each_existing_uplink_receives_all_probe_targets(self):
         text = (ROOT / 'files/etc/uci-defaults/90-acrh17').read_text()
         block = text.split('if [ -x /etc/init.d/mwan3 ]; then\n', 1)[1].split('/etc/init.d/mwan3 disable', 1)[0]
