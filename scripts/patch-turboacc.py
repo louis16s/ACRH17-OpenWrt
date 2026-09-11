@@ -23,6 +23,41 @@ for symbol, package in unsupported.items():
         raise SystemExit(f"TurboACC recipe changed; expected one dependency for {marker}")
     text = "".join(line for line in text.splitlines(keepends=True) if marker not in line)
 
+# The dependency entries above are part of make's backslash-continued
+# variable assignments.  Removing the last entry must also remove the
+# continuation marker from the new last entry; otherwise the following
+# ``LUCI_PKGARCH:=all`` assignment is parsed as a bogus dependency named
+# ``=all``.  Keep this generic so a harmless ordering change in the recipe
+# does not reintroduce the warning.
+def close_dependency_block(source, variable):
+    lines = source.splitlines(keepends=True)
+    index = 0
+    prefix = f"{variable}:="
+    while index < len(lines):
+        if not lines[index].startswith(prefix):
+            index += 1
+            continue
+
+        end = index + 1
+        while end < len(lines):
+            current = lines[end]
+            if current.strip() == "" or current.startswith((" ", "\t")):
+                end += 1
+                continue
+            break
+
+        for candidate in range(end - 1, index, -1):
+            if lines[candidate].strip():
+                content = lines[candidate].rstrip("\r\n")
+                if content.endswith("\\"):
+                    # Preserve the line ending when the final entry already
+                    # is a complete assignment (for example, a Kconfig
+                    # block whose last unsupported entry was removed later).
+                    lines[candidate] = content[:-1].rstrip() + "\n"
+                break
+        index = end
+    return "".join(lines)
+
 # Drop the matching Kconfig dependency declarations as well.
 text = "".join(
     line for line in text.splitlines(keepends=True)
@@ -49,6 +84,12 @@ for line in lines:
     if not skip:
         out.append(line)
 text = "".join(out)
+
+# Run this after both dependency and Kconfig entries have been pruned so the
+# remaining last entry in each make variable is the one whose continuation
+# marker must be closed.
+for dependency_variable in ("PKG_CONFIG_DEPENDS", "LUCI_DEPENDS"):
+    text = close_dependency_block(text, dependency_variable)
 
 for symbol in unsupported:
     if f"INCLUDE_{symbol}" in text:

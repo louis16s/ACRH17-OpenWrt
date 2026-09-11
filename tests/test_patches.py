@@ -45,6 +45,8 @@ endef
         self.assertIn("INCLUDE_OFFLOADING", result)
         self.assertIn("INCLUDE_BBR_CCA", result)
         self.assertIn("kmod-nft-offload", result)
+        self.assertRegex(result, r"(?m)^\t\+PACKAGE_\$\(PKG_NAME\)_INCLUDE_OFFLOADING:kmod-nft-offload$")
+        self.assertNotIn("kmod-nft-offload \\\nLUCI_PKGARCH", result)
 
 
 if __name__ == "__main__":
