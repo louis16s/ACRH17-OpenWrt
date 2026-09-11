@@ -16,7 +16,7 @@
 | SmartDNS / dnsmasq | 保留 6053 / 53 端口分工与直连 DNS 回退；监听和双栈选择明确设为 IPv4-only；实际超时回退延迟取决于上游和 dnsmasq，不能保证即时切换 |
 | TurboACC / UA3F | 保留软件、硬件、SFE、FullCone 默认关闭；BBR、irqbalance、zram 使用原有实现 |
 | TurboACC 可选依赖 | 构建前移除 24.10 feed 中不存在的 Shortcut-FE / NFT FullCone 依赖和菜单项；修复 Makefile 续行，避免把 `=all` 误解析成依赖；保留可用的 flow offload 与 BBR CCA |
-| feeds / 构建缓存 | 在 feeds install 前移除缺少 `rpcd-mod-rad3-enc` 的未使用 `luci-app-radicale3`；对固定发行版的可选缺依赖仅保留完整日志并过滤已知元数据提示，异常 warning 仍会让步骤失败；下载目录和 ccache 使用稳定键，后续矩阵构建可直接复用 |
+| feeds / 构建缓存 | 在 feeds install 前移除缺少 `rpcd-mod-rad3-enc` 的未使用 `luci-app-radicale3`；固定发行版可选缺依赖只写入完整日志；`CONFIG_DEVEL=y` 解锁 `CONFIG_CCACHE=y`，下载目录和 ccache 使用稳定键，后续矩阵构建可直接复用 |
 | 打印 / USB 网络 | 保留驱动和 p910nd；服务默认关闭，无新打印 daemon；多 USB 设备需要合适供电及 Hub |
 | 构建并发 | 默认分支自动触发一个矩阵 run，固定读取四个变体分支；批量同步其他分支不会再产生重复 run，仍可手动触发 |
 | Release | 矩阵四个 job 全部成功后自动创建 `build-<run_id>` Release，仅上传四个带变体前缀的 sysupgrade `.bin`；initramfs 和日志仍在 Actions artifact |
