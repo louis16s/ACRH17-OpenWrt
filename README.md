@@ -252,14 +252,16 @@ RT-ACRH17 的 5 GHz 使用 QCA9984，官方 OpenWrt 24.10 设备定义使用
 
 ## 构建提速与稳定性
 
-每次完整构建使用独立并发标识，保留已在运行的任务。纯 Markdown
-修改不触发完整编译。下载目录与 ccache 分开缓存；ccache 按系统分支、源码锁、
-配置和 runner 系统隔离，容量限制为 2 GiB。首次构建需建立缓存，实际提速以
-后续命中后的耗时为准。第三方源码按固定提交浅拉取。
+完整构建使用一个矩阵 run，在同一次 Actions 中并行编译 OpenWrt / ImmortalWrt
+的 Campus（mwan3）和 Single WAN 四个变体；新提交会取消旧的矩阵 run，避免重复
+占用 runner。每个变体的固件和日志使用 `RT-ACRH17-<variant>-<run_id>` 命名。
+纯 Markdown 修改不触发完整编译。下载目录与 ccache 分开缓存；ccache 按变体、
+源码锁和配置隔离，容量限制为 2 GiB。第三方源码按固定提交浅拉取。
 
 完整构建会生成 `fast-base-<commit>`，包含专用 standalone ImageBuilder。
 只修改 `files/` 默认配置或锐捷包的脚本、Lua、CSS 时，可以在同分支手动运行
-`Fast RT-ACRH17 image`，输入成功的完整构建 run ID。它检查源码、包配置与构建
+`Fast RT-ACRH17 image`，输入成功的完整矩阵 run ID 和 `variant`。它按所选变体
+下载对应的 ImageBuilder，检查源码、包配置与构建
 补丁是否匹配，再覆盖当前配置文件和锐捷脚本生成标准 sysupgrade。改变内核、
 feeds、软件包清单、主题上游或包 Makefile 时必须重新完整构建。
 
