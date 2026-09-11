@@ -271,6 +271,13 @@ feeds、软件包清单、主题上游或包 Makefile 时必须重新完整构�
 SmartDNS；启用 mwan3 或代理重写时应先验证正常路径，再在实机比较软件卸载开关
 对吞吐、重写和故障切换的影响，不把加速开关全部打开作为默认优化。
 
+完整矩阵构建成功后，Actions 会自动创建一个以 `build-<run_id>` 命名的 GitHub
+Release。Release 只附加四个变体的 `sysupgrade.bin`；对应的 initramfs、构建配置和
+完整日志仍保留在同一次 Actions 的 artifacts 中。首次测试请先确认 OpBoot 版本是否
+支持 RAM/临时启动，并使用同一变体的 initramfs；确认设备可正常启动后再刷对应的
+sysupgrade.bin。Release 流程不会生成或写入 ART、EEPROM、Factory、校准或 Bootloader
+分区内容。
+
 Argon 通过 UCI `mode=dark` 强制暗色，64 MiB zram 配置持久化。锐捷页面将门户
 返回的认证结果与联网检查分开；HTTP 204 探测成功才记录已联网，注销记录为离线。
 
