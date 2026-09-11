@@ -6,6 +6,16 @@ on:
         description: Successful full build run ID from this branch
         required: true
         type: string
+      variant:
+        description: Matrix variant to rebuild with ImageBuilder
+        required: true
+        type: choice
+        default: openwrt-campus
+        options:
+          - openwrt-campus
+          - immortalwrt-campus
+          - openwrt-singlewan
+          - immortalwrt-singlewan
 permissions:
   actions: read
   contents: read
@@ -19,6 +29,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       BASE_RUN: ${{ inputs.base_run }}
+      VARIANT: ${{ inputs.variant }}
     steps:
       - uses: actions/checkout@v4
       - name: Validate and download matching baseline
@@ -30,9 +41,10 @@ jobs:
           r = json.load(open('run.json'))
           assert r['head_branch'] == os.environ['GITHUB_REF_NAME'], 'Baseline must be from the same branch'
           assert r['conclusion'] == 'success', 'Baseline must be successful'
-          assert r['path'] == '.github/workflows/build.yml', 'Choose a full build'
+          assert r['path'] == '.github/workflows/build.yml', 'Choose a full matrix build'
+          assert r['name'] == 'RT-ACRH17 Firmware Matrix', 'Choose the matrix firmware build'
           PY
-          gh run download "$BASE_RUN" --repo "$GITHUB_REPOSITORY" --pattern 'fast-base-*' --dir baseline
+          gh run download "$BASE_RUN" --repo "$GITHUB_REPOSITORY" --name "fast-base-${VARIANT}-${BASE_RUN}" --dir baseline
           python3 scripts/fast-base.py check baseline
       - name: Install tools and validate overlays
         run: |

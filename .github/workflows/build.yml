@@ -1,5 +1,5 @@
-name: RT-ACRH17 OpenWrt Single WAN
-run-name: OpenWrt 24.10 Single WAN · UA3F · ${{ github.ref_name }} · ${{ github.sha }}
+name: RT-ACRH17 Firmware Matrix
+run-name: RT-ACRH17 matrix build · ${{ github.ref_name }} · run ${{ github.run_id }}
 on:
   workflow_dispatch:
   push:
@@ -8,25 +8,53 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: acrh17-${{ github.ref }}-${{ github.run_id }}
-  cancel-in-progress: false
+  # One matrix run owns all four variants. A newer push replaces an older
+  # matrix run instead of leaving one build per branch consuming a runner.
+  group: acrh17-matrix-${{ github.repository }}
+  cancel-in-progress: true
 jobs:
   build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: openwrt-campus
+            ref: codex/openwrt-24.10
+            label: OpenWrt 24.10 Campus · mwan3
+          - id: immortalwrt-campus
+            ref: codex/immortalwrt-24.10
+            label: ImmortalWrt 24.10 Campus · mwan3
+          - id: openwrt-singlewan
+            ref: codex/openwrt-24.10-singlewan
+            label: OpenWrt 24.10 Single WAN
+          - id: immortalwrt-singlewan
+            ref: codex/immortalwrt-24.10-singlewan
+            label: ImmortalWrt 24.10 Single WAN
     runs-on: ubuntu-24.04
     timeout-minutes: 360
     env:
       CCACHE_MAXSIZE: 2G
+      VARIANT_ID: ${{ matrix.id }}
+      VARIANT_REF: ${{ matrix.ref }}
+      VARIANT_LABEL: ${{ matrix.label }}
     defaults:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout project variant
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.ref }}
+          path: project
+
       - name: Install build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential clang flex bison g++ gawk gcc-multilib g++-multilib gettext git libncurses-dev libssl-dev python3 python3-setuptools rsync swig unzip zlib1g-dev file wget curl time lua5.1
-          mkdir -p logs artifacts
+          mkdir -p project/logs project/artifacts
+
       - name: Validate project scripts
+        working-directory: project
         run: |
           sh -n scripts/prepare.sh
           sh -n files/etc/uci-defaults/90-acrh17
@@ -36,7 +64,9 @@ jobs:
           sh -n package/ruijie-auth/files/etc/init.d/ruijie-auth
           find package -name '*.lua' -exec luac -p {} \;
           python3 -m unittest discover -s tests -v
+
       - name: Checkout pinned OpenWrt and feeds
+        working-directory: project
         run: |
           set -o pipefail
           source sources.env
@@ -61,23 +91,27 @@ jobs:
           cp ../sources.env ../artifacts/
           git rev-parse HEAD > ../artifacts/openwrt-commit.txt
           git -C .. rev-parse HEAD > ../artifacts/project-commit.txt
+
       - uses: actions/cache@v4
         with:
-          path: openwrt/dl
-          key: dl-${{ runner.os }}-${{ github.ref_name }}-${{ hashFiles('sources.env') }}-${{ github.run_id }}
-          restore-keys: dl-${{ runner.os }}-${{ github.ref_name }}-${{ hashFiles('sources.env') }}-
+          path: project/openwrt/dl
+          key: dl-${{ runner.os }}-${{ matrix.id }}-${{ hashFiles('project/sources.env') }}-${{ github.run_id }}
+          restore-keys: dl-${{ runner.os }}-${{ matrix.id }}-${{ hashFiles('project/sources.env') }}-
+
       - uses: actions/cache@v4
         with:
-          path: openwrt/.ccache
-          key: cc-${{ runner.os }}-${{ github.ref_name }}-${{ hashFiles('sources.env', 'configs/acrh17.config') }}-${{ github.run_id }}
-          restore-keys: cc-${{ runner.os }}-${{ github.ref_name }}-${{ hashFiles('sources.env', 'configs/acrh17.config') }}-
+          path: project/openwrt/.ccache
+          key: cc-${{ runner.os }}-${{ matrix.id }}-${{ hashFiles('project/sources.env', 'project/configs/acrh17.config') }}-${{ github.run_id }}
+          restore-keys: cc-${{ runner.os }}-${{ matrix.id }}-${{ hashFiles('project/sources.env', 'project/configs/acrh17.config') }}-
+
       - name: Download sources
-        working-directory: openwrt
+        working-directory: project/openwrt
         run: |
           set -o pipefail
           make download -j8 2>&1 | tee ../logs/download.log
+
       - name: Compile firmware
-        working-directory: openwrt
+        working-directory: project/openwrt
         run: |
           set -o pipefail
           set +e
@@ -87,32 +121,37 @@ jobs:
           if [ "$result" -ne 0 ]; then
             make -j1 V=s 2>&1 | tee ../logs/build-serial.log
           fi
+
       - name: Verify firmware and core packages
+        working-directory: project
         run: |
           python3 scripts/verify-artifacts.py openwrt/bin/targets/ipq40xx/generic
           cp -R openwrt/bin/targets/ipq40xx/generic/. artifacts/
           mkdir -p fast-base
           cp openwrt/bin/targets/ipq40xx/generic/*imagebuilder*.tar.zst fast-base/
           python3 scripts/fast-base.py stamp fast-base
+
       - name: Upload firmware
         uses: actions/upload-artifact@v4
         with:
-          name: RT-ACRH17-OpenWrt-24.10-SingleWAN-UA3F-${{ github.sha }}
+          name: RT-ACRH17-${{ matrix.id }}-${{ github.run_id }}
           path: |
-            artifacts/
-            !artifacts/*imagebuilder*.tar.zst
+            project/artifacts/
+            !project/artifacts/*imagebuilder*.tar.zst
           if-no-files-found: error
           retention-days: 30
+
       - uses: actions/upload-artifact@v4
         with:
-          name: fast-base-${{ github.sha }}
-          path: fast-base/
+          name: fast-base-${{ matrix.id }}-${{ github.run_id }}
+          path: project/fast-base/
           retention-days: 30
+
       - name: Upload full logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: build-logs-${{ github.sha }}
-          path: logs/
+          name: build-logs-${{ matrix.id }}-${{ github.run_id }}
+          path: project/logs/
           if-no-files-found: warn
           retention-days: 30
