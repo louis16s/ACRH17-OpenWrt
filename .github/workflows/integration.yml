@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v5
         with:
           go-version: '1.23.12'
@@ -26,7 +26,7 @@ jobs:
           GOTOOLCHAIN=local CGO_ENABLED=0 go build -o /tmp/ua3f-test .
       - name: Test transparent rewrite on both simulated WANs
         run: sudo bash tests/routing-netns.sh /tmp/ua3f-test
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: routing-test-logs
