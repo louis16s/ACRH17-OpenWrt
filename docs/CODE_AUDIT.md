@@ -15,6 +15,7 @@
 | USB WAN / 校园 WAN | 重拨前检查逻辑接口存在，并拒绝校园接口名，避免误断主 WAN |
 | SmartDNS / dnsmasq | 保留 6053 / 53 端口分工与直连 DNS 回退；实际超时回退延迟取决于上游和 dnsmasq，不能保证即时切换 |
 | TurboACC / UA3F | 保留软件、硬件、SFE、FullCone 默认关闭；BBR、irqbalance、zram 使用原有实现 |
+| TurboACC 可选依赖 | 构建前移除 24.10 feed 中不存在的 Shortcut-FE / NFT FullCone 依赖和菜单项；保留可用的 flow offload 与 BBR CCA |
 | 打印 / USB 网络 | 保留驱动和 p910nd；服务默认关闭，无新打印 daemon；多 USB 设备需要合适供电及 Hub |
 | 构建并发 | 独立 run ID 并发组，保留已有任务；明确系统与 mwan3 / 单上联版本名 |
 
