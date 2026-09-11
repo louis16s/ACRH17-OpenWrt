@@ -82,6 +82,14 @@ jobs:
           FEEDS
           ./scripts/feeds update -a 2>&1 | tee ../logs/feeds-update.log
           ./scripts/feeds install -a 2>&1 | tee ../logs/feeds-install.log
+          # luci-app-radicale3 currently references rpcd-mod-rad3-enc, which
+          # is absent from the pinned packages feed.  It is not selected by
+          # this firmware; remove only its generated feed symlink so
+          # make-defconfig does not emit a misleading missing-dependency
+          # warning or spend time evaluating an unusable optional package.
+          if [ -L package/feeds/luci/luci-app-radicale3 ]; then
+            rm package/feeds/luci/luci-app-radicale3
+          fi
           ../scripts/prepare.sh 2>&1 | tee ../logs/prepare.log
           cp ../configs/acrh17.config .config
           make defconfig 2>&1 | tee ../logs/defconfig.log
@@ -95,13 +103,13 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: project/openwrt/dl
-          key: dl-${{ runner.os }}-${{ matrix.id }}-${{ hashFiles('project/sources.env') }}-${{ github.run_id }}
+          key: dl-${{ runner.os }}-${{ matrix.id }}-${{ hashFiles('project/sources.env') }}
           restore-keys: dl-${{ runner.os }}-${{ matrix.id }}-${{ hashFiles('project/sources.env') }}-
 
       - uses: actions/cache@v4
         with:
           path: project/openwrt/.ccache
-          key: cc-${{ runner.os }}-${{ matrix.id }}-${{ hashFiles('project/sources.env', 'project/configs/acrh17.config') }}-${{ github.run_id }}
+          key: cc-${{ runner.os }}-${{ matrix.id }}-${{ hashFiles('project/sources.env', 'project/configs/acrh17.config') }}
           restore-keys: cc-${{ runner.os }}-${{ matrix.id }}-${{ hashFiles('project/sources.env', 'project/configs/acrh17.config') }}-
 
       - name: Download sources
