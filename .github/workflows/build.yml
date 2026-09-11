@@ -104,13 +104,15 @@ jobs:
         with:
           path: project/openwrt/dl
           key: dl-${{ runner.os }}-${{ matrix.id }}-${{ hashFiles('project/sources.env') }}
-          restore-keys: dl-${{ runner.os }}-${{ matrix.id }}-${{ hashFiles('project/sources.env') }}-
+          restore-keys: |
+            dl-${{ runner.os }}-${{ matrix.id }}-
 
       - uses: actions/cache@v4
         with:
           path: project/openwrt/.ccache
           key: cc-${{ runner.os }}-${{ matrix.id }}-${{ hashFiles('project/sources.env', 'project/configs/acrh17.config') }}
-          restore-keys: cc-${{ runner.os }}-${{ matrix.id }}-${{ hashFiles('project/sources.env', 'project/configs/acrh17.config') }}-
+          restore-keys: |
+            cc-${{ runner.os }}-${{ matrix.id }}-
 
       - name: Download sources
         working-directory: project/openwrt
