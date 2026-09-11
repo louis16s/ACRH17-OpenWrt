@@ -18,7 +18,7 @@
 | TurboACC 可选依赖 | 构建前移除 24.10 feed 中不存在的 Shortcut-FE / NFT FullCone 依赖和菜单项；修复 Makefile 续行，避免把 `=all` 误解析成依赖；保留可用的 flow offload 与 BBR CCA |
 | feeds / 构建缓存 | 跳过缺少 `rpcd-mod-rad3-enc` 的未使用 `luci-app-radicale3` feed 链接；下载目录和 ccache 使用稳定键，后续矩阵构建可直接复用 |
 | 打印 / USB 网络 | 保留驱动和 p910nd；服务默认关闭，无新打印 daemon；多 USB 设备需要合适供电及 Hub |
-| 构建并发 | 独立 run ID 并发组，保留已有任务；明确系统与 mwan3 / 单上联版本名 |
+| 构建并发 | 默认分支自动触发一个矩阵 run，固定读取四个变体分支；批量同步其他分支不会再产生重复 run，仍可手动触发 |
 
 测试包括真实本机 HTTP 请求、URL 编码、凭据隔离、门户拒绝响应、无 IPv4、并发锁、
 开机 DHCP 等待、完整退避序列、UCI 多接口探测列表和包排除校验。

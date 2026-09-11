@@ -3,7 +3,11 @@ run-name: RT-ACRH17 matrix build · ${{ github.ref_name }} · run ${{ github.run
 on:
   workflow_dispatch:
   push:
-    branches: [main, 'codex/**']
+    # The matrix checks out all four fixed variant refs below.  Listening on
+    # the default branch only prevents a batch branch sync from spawning and
+    # cancelling three redundant matrix runs; other branches remain
+    # available through workflow_dispatch.
+    branches: ['codex/openwrt-24.10']
     paths-ignore: ['**/*.md']
 permissions:
   contents: read
