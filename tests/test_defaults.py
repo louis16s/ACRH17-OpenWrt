@@ -40,3 +40,8 @@ esac
             result = subprocess.run(['python3', str(ROOT / 'scripts/verify-config.py'), str(requested), str(resolved)], capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('Excluded package selected: mwan3', result.stderr)
+
+    def test_build_cache_is_enabled(self):
+        config = (ROOT / 'configs/acrh17.config').read_text()
+        self.assertIn('CONFIG_DEVEL=y', config)
+        self.assertIn('CONFIG_CCACHE=y', config)
