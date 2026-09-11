@@ -254,8 +254,9 @@ RT-ACRH17 的 5 GHz 使用 QCA9984，官方 OpenWrt 24.10 设备定义使用
 ## 构建提速与稳定性
 
 完整构建使用一个矩阵 run，在同一次 Actions 中并行编译 OpenWrt / ImmortalWrt
-的 Campus（mwan3）和 Single WAN 四个变体；新提交会取消旧的矩阵 run，避免重复
-占用 runner。每个变体的固件和日志使用 `RT-ACRH17-<variant>-<run_id>` 命名。
+的 Campus（mwan3）和 Single WAN 四个变体；默认分支的提交会取消旧的矩阵 run，
+避免批量同步变体分支时重复占用 runner。每个变体的固件和日志使用
+`RT-ACRH17-<variant>-<run_id>` 命名。其他变体分支仍可在 Actions 中手动触发同一矩阵。
 纯 Markdown 修改不触发完整编译。下载目录与 ccache 分开缓存；ccache 按变体、
 源码锁和配置隔离，容量限制为 2 GiB。第三方源码按固定提交浅拉取。
 
