@@ -232,7 +232,8 @@ jobs:
           for artifact in release-input/RT-ACRH17-*; do
             [ -d "$artifact" ] || continue
             variant=${artifact##*/RT-ACRH17-}
-            variant=${variant%-${GITHUB_RUN_ID}}
+            run_id_suffix="-${GITHUB_RUN_ID}"
+            variant="${variant%"$run_id_suffix"}"
             for image in "$artifact"/*.bin; do
               [ -f "$image" ] || continue
               cp "$image" "release-assets/${variant}-$(basename "$image")"
