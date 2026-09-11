@@ -74,7 +74,7 @@ jobs:
         run: |
           set -o pipefail
           source sources.env
-          git init openwrt
+          git -c init.defaultBranch=main init openwrt
           git -C openwrt remote add origin "$OPENWRT_REPOSITORY"
           git -C openwrt fetch --depth=1 origin "$OPENWRT_COMMIT"
           git -C openwrt checkout --detach FETCH_HEAD
@@ -85,15 +85,51 @@ jobs:
           src-git routing $ROUTING_REPOSITORY^$ROUTING_COMMIT
           FEEDS
           ./scripts/feeds update -a 2>&1 | tee ../logs/feeds-update.log
-          ./scripts/feeds install -a 2>&1 | tee ../logs/feeds-install.log
-          # luci-app-radicale3 currently references rpcd-mod-rad3-enc, which
-          # is absent from the pinned packages feed.  It is not selected by
-          # this firmware; remove only its generated feed symlink so
-          # make-defconfig does not emit a misleading missing-dependency
-          # warning or spend time evaluating an unusable optional package.
-          if [ -L package/feeds/luci/luci-app-radicale3 ]; then
-            rm package/feeds/luci/luci-app-radicale3
+          # This optional LuCI app currently depends on
+          # rpcd-mod-rad3-enc, absent from the pinned packages feed.  Remove
+          # its feed source before install so feeds itself stays warning-free;
+          # the app is not part of any requested firmware profile.
+          python3 - <<'PY'
+          from pathlib import Path
+          import shutil
+          radicale = Path('feeds/luci/applications/luci-app-radicale3')
+          if radicale.is_symlink():
+              radicale.unlink()
+          elif radicale.is_dir():
+              shutil.rmtree(radicale)
+          PY
+          # Feed metadata contains optional packages from the pinned
+          # distributions whose dependencies are intentionally not shipped
+          # in this minimal profile.  Keep the complete output in the log,
+          # but do not turn those known upstream metadata notices into noisy
+          # Actions warnings.  Any unexpected warning or a real install
+          # failure remains visible and fails this step.
+          set +e
+          ./scripts/feeds install -a > ../logs/feeds-install.log 2>&1
+          feed_status=$?
+          set -e
+          if [ "$feed_status" -ne 0 ]; then
+            cat ../logs/feeds-install.log
+            exit "$feed_status"
           fi
+          python3 - <<'PY'
+          from pathlib import Path
+          lines = Path('../logs/feeds-install.log').read_text(errors='replace').splitlines()
+          known = (
+              "WARNING: Makefile 'package/utils/audit/Makefile' has a dependency on 'libev'",
+              "WARNING: Makefile 'package/emortal/",
+              "WARNING: Makefile 'package/utils/busybox/Makefile' has",
+              "WARNING: Makefile 'package/boot/kexec-tools/Makefile' has a dependency on 'liblzma'",
+              "WARNING: Makefile 'package/network/services/lldpd/Makefile' has a dependency on 'libnetsnmp'",
+              "WARNING: Makefile 'package/utils/policycoreutils/Makefile' has",
+              "WARNING: No feed for package 'rpcd-mod-rad3-enc' found",
+          )
+          unexpected = [line for line in lines if line.startswith('WARNING:') and not line.startswith(known)]
+          if unexpected:
+              print('\n'.join(unexpected))
+              raise SystemExit('Unexpected feed warning; inspect feeds-install.log')
+          print('\n'.join(line for line in lines if not line.startswith('WARNING:')))
+          PY
           ../scripts/prepare.sh 2>&1 | tee ../logs/prepare.log
           cp ../configs/acrh17.config .config
           make defconfig 2>&1 | tee ../logs/defconfig.log
@@ -169,3 +205,54 @@ jobs:
           path: project/logs/
           if-no-files-found: warn
           retention-days: 30
+
+  release:
+    name: Publish .bin firmware release
+    needs: build
+    if: needs.build.result == 'success'
+    permissions:
+      contents: write
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download matrix firmware artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: RT-ACRH17-*-${{ github.run_id }}
+          path: release-input
+          merge-multiple: false
+
+      - name: Publish sysupgrade binaries
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          shopt -s nullglob
+          for artifact in release-input/RT-ACRH17-*; do
+            [ -d "$artifact" ] || continue
+            variant=${artifact##*/RT-ACRH17-}
+            run_id_suffix="-${GITHUB_RUN_ID}"
+            variant="${variant%"$run_id_suffix"}"
+            for image in "$artifact"/*.bin; do
+              [ -f "$image" ] || continue
+              cp "$image" "release-assets/${variant}-$(basename "$image")"
+            done
+          done
+          mapfile -d '' assets < <(find release-assets -type f -name '*.bin' -print0 | sort -z)
+          [ "${#assets[@]}" -eq 4 ] || {
+            printf 'Expected four sysupgrade .bin files, found %s\n' "${#assets[@]}" >&2
+            find release-input -maxdepth 3 -type f -print >&2
+            exit 1
+          }
+          tag="build-${GITHUB_RUN_ID}"
+          title="RT-ACRH17 firmware build ${GITHUB_RUN_ID}"
+          cat > release-notes.md <<EOF
+          Automated OpenWrt 24.10 / ImmortalWrt 24.10 RT-ACRH17 matrix build.
+
+          Only sysupgrade .bin images are attached; use the matching initramfs artifact for first RAM-boot testing when supported by the installed OpBoot version. No ART, EEPROM, Factory, calibration, or bootloader data is included or modified.
+          EOF
+          gh release create "$tag" "${assets[@]}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$title" \
+            --notes-file release-notes.md

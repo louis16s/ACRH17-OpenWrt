@@ -6,7 +6,7 @@ PROJECT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 [ -f include/toplevel.mk ] || { echo 'Run inside an OpenWrt source tree' >&2; exit 1; }
 [ ! -e package/UA3F ] || { echo 'UA3F directory already exists' >&2; exit 1; }
 fetch_source() {
- git init "$3"
+ git -c init.defaultBranch=main init "$3" >/dev/null
  git -C "$3" remote add origin "$1"
  git -C "$3" fetch --depth=1 origin "$2"
  git -C "$3" checkout --detach FETCH_HEAD
