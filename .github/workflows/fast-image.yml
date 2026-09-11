@@ -31,7 +31,7 @@ jobs:
       BASE_RUN: ${{ inputs.base_run }}
       VARIANT: ${{ inputs.variant }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Validate and download matching baseline
         run: |
           [[ "$BASE_RUN" =~ ^[0-9]+$ ]]
@@ -72,11 +72,11 @@ jobs:
           cp -a imagebuilder/bin/targets/ipq40xx/generic/. artifacts/
           cp baseline/project-commit.txt artifacts/base-commit.txt
           git rev-parse HEAD > artifacts/project-commit.txt
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: fast-firmware-${{ github.sha }}
           path: artifacts/
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: fast-logs-${{ github.sha }}
