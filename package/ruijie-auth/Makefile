@@ -12,7 +12,7 @@ define Package/ruijie-auth
   SECTION:=net
   CATEGORY:=Network
   TITLE:=Ruijie ePortal authentication helper with LuCI
-  DEPENDS:=+curl +ca-bundle +jsonfilter +flock +luci-compat
+  DEPENDS:=+curl +ca-bundle +jsonfilter +flock +libubus-lua +luci-compat
 endef
 
 define Package/ruijie-auth/description

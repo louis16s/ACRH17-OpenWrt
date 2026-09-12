@@ -1,4 +1,5 @@
 local sys = require "luci.sys"
+local util = require "luci.util"
 
 local function trim(value)
 	return (value or ""):gsub("^%s+", ""):gsub("%s+$", "")
@@ -6,7 +7,6 @@ end
 
 -- Read one snapshot per page instead of forking sed/head/uci for each field.
 local fs = require "nixio.fs"
-local json = require "luci.jsonc"
 local cursor = require("luci.model.uci").cursor()
 local state_values = {}
 for line in (fs.readfile("/tmp/ruijie-auth.state") or ""):gmatch("[^\n]+") do
@@ -29,7 +29,8 @@ local function wan_name()
 	local name = cursor:get("ruijie", "main", "wan_interface") or "wan"
 	return name:match("^[%w_%-]+$") and name or "wan"
 end
-local wan_status = json.parse(sys.exec("ubus call network.interface." .. wan_name() .. " status 2>/dev/null")) or {}
+local wan = wan_name()
+local wan_status = util.ubus("network.interface." .. wan, "status") or {}
 local function wan_ipv4()
 	return ((wan_status["ipv4-address"] or {})[1] or {}).address or ""
 end
@@ -42,9 +43,23 @@ local function wan_gateway()
 	return ""
 end
 
+local service_running = sys.call("/etc/init.d/ruijie-auth running >/dev/null 2>&1") == 0
+local auth_state = state("auth_state")
+local last_result = state("last_result")
+local last_time = state("last_time")
+local last_summary = state("last_summary")
+local dashboard = Template("ruijie/dashboard")
+dashboard.wan = wan
+dashboard.ip = wan_ipv4()
+dashboard.auth = auth_state
+dashboard.service = service_running
+dashboard.last_result = last_result
+dashboard.last_time = last_time
+dashboard.last_summary = last_summary
+
 m = Map("ruijie", translate("Ruijie ePortal / 锐捷认证"),
 	translate("校园网认证中心。认证请求以短超时在后台运行，刷新页面即可查看执行结果。"))
-m:append(Template("ruijie/dashboard"))
+m:append(dashboard)
 
 status_section = m:section(SimpleSection, translate("当前状态"))
 local function display(name, label, value)
@@ -55,14 +70,14 @@ local function display(name, label, value)
 	end
 end
 
-display("service", translate("服务状态"), function() return sys.call("/etc/init.d/ruijie-auth running >/dev/null 2>&1") == 0 and translate("Running") or translate("Stopped") end)
-display("auth", translate("当前认证状态"), function() return ({ online = translate("已联网"), authenticating = translate("正在认证"), failed = translate("认证失败") })[state("auth_state")] or translate("未联网") end)
-display("wan", translate("WAN 接口"), wan_name)
+display("service", translate("服务状态"), function() return service_running and translate("Running") or translate("Stopped") end)
+display("auth", translate("当前认证状态"), function() return ({ online = translate("已联网"), authenticating = translate("正在认证"), failed = translate("认证失败") })[auth_state] or translate("未联网") end)
+display("wan", translate("WAN 接口"), function() return wan end)
 display("ipv4", translate("WAN IPv4 地址"), wan_ipv4)
 display("gateway", translate("默认网关"), wan_gateway)
-display("last_time", translate("最近认证时间"), function() return state("last_time") end)
-display("last_result", translate("最近一次认证结果"), function() return state("last_result") end)
-display("last_summary", translate("最近认证返回内容摘要"), function() return state("last_summary") end)
+display("last_time", translate("最近认证时间"), function() return last_time end)
+display("last_result", translate("最近一次认证结果"), function() return last_result end)
+display("last_summary", translate("最近认证返回内容摘要"), function() return last_summary end)
 display("reconnect", translate("自动重连"), function() return cursor:get("ruijie", "main", "auto_reconnect") == "1" and translate("已启用") or translate("未启用") end)
 display("action_result", translate("最近快捷操作"), function()
 	local result = action_result()
