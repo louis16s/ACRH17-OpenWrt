@@ -56,6 +56,8 @@ UA3F、mwan3、SmartDNS、TurboACC 直接相关的实现。并非逐行审查整
 凭据文件权限、curlrc 隔离、认证锁、重拨等待/超时、退避、升级保护、包开关、镜像损坏、
 SSL 冲突及上游补丁回归测试。固定 UA3F 已完成 ARMv7 交叉编译。
 Linux 集成测试包含 Go 层连接标记测试和两个 network namespace WAN 的实际透明 HTTP 重写。
+最终代码的 [Linux 验证 34683557944](https://github.com/louis16s/ACRH17-OpenWrt/actions/runs/34683557944)
+已成功：35 项项目回归测试、Go NFQUEUE 标记测试、UA3F Linux 编译和双 WAN 透明重写均通过。
 矩阵构建现在以此集成测试成功作为编译前置条件。
 
 - 源码与离线镜像验证不能保证未知 OpBoot 版本的首次刷入兼容性；不绕过设备检查，不修改校准/引导分区。
