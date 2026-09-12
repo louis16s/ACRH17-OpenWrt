@@ -45,3 +45,26 @@ esac
         config = (ROOT / 'configs/acrh17.config').read_text()
         self.assertIn('CONFIG_DEVEL=y', config)
         self.assertIn('CONFIG_CCACHE=y', config)
+
+    def test_required_build_and_feature_symbols_cannot_disappear(self):
+        for symbol in ('CONFIG_IB', 'CONFIG_IB_STANDALONE', 'CONFIG_CCACHE',
+                       'CONFIG_LUCI_LANG_zh_Hans',
+                       'CONFIG_PACKAGE_luci-app-turboacc_INCLUDE_OFFLOADING'):
+            with self.subTest(symbol=symbol), tempfile.TemporaryDirectory() as d:
+                requested, resolved = Path(d) / 'requested', Path(d) / 'resolved'
+                requested.write_text(symbol + '=y\n')
+                resolved.write_text('')
+                result = subprocess.run(['python3', str(ROOT / 'scripts/verify-config.py'), str(requested), str(resolved)], capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(symbol, result.stderr)
+
+    def test_retained_installation_skips_factory_defaults(self):
+        text = (ROOT / 'files/etc/uci-defaults/90-acrh17').read_text()
+        guard = text.split("uci -q set network.lan.ipaddr=", 1)[0]
+        for marker, password in ((1, 0), (0, 1), (0, 0)):
+            mock = """chmod() { :; }
+uci() { case "$1:$2:$3" in -q:get:acrh17.settings.defaults_applied) echo MARKER;; esac; }
+awk() { return PASSWORD; }
+""".replace('MARKER', str(marker)).replace('PASSWORD', '0' if password else '1')
+            result = subprocess.run(['sh', '-c', mock + guard + '\necho APPLY_FACTORY_DEFAULTS'], capture_output=True, text=True, check=True)
+            self.assertEqual('APPLY_FACTORY_DEFAULTS' in result.stdout, not (marker or password))
