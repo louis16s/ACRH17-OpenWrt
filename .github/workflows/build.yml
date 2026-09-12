@@ -43,8 +43,10 @@ jobs:
               output.write('matrix=' + json.dumps(matrix) + '\n')
           print(json.dumps(matrix, indent=2))
           PYTHON
+  routing:
+    uses: ./.github/workflows/integration.yml
   build:
-    needs: resolve
+    needs: [resolve, routing]
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.resolve.outputs.matrix) }}

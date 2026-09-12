@@ -1,0 +1,30 @@
+[
+  {
+    "variant": "immortalwrt-campus",
+    "size": 18146362,
+    "sha256": "f2c6b3f42ad57b8ed54832288ed2a01c28e977ac6331ba1c29a3279561245218",
+    "packages": 304,
+    "commit": "9edb0d9e52babf2ed9a04c5e45dcd6baf996c1ff"
+  },
+  {
+    "variant": "immortalwrt-singlewan",
+    "size": 18136122,
+    "sha256": "805d59ee4597755424ae426d61547de38615244224ce9cbabc462400a60e18f3",
+    "packages": 298,
+    "commit": "2e518e9f1c018fc299159979fb383f56e8389aa2"
+  },
+  {
+    "variant": "openwrt-campus",
+    "size": 16159798,
+    "sha256": "36e6cce7002a0f2bea4ed13d6b3766e502acdc04418d749488f01188f4513edf",
+    "packages": 258,
+    "commit": "63167e273685abb92dbf285d390cd29ccf4ab566"
+  },
+  {
+    "variant": "openwrt-singlewan",
+    "size": 16129078,
+    "sha256": "44699e78fae93d6d8645b40573aa6ea5d02ed0888a3fa61e4f3ea63d126ca052",
+    "packages": 252,
+    "commit": "62d95491ed4c3f82cca58a8ab1b5f4eb7bfc10de"
+  }
+]
