@@ -67,6 +67,16 @@ class Ua3fMwan3PatchTests(unittest.TestCase):
                 '\t\t\t"mark set", s.tproxyFwMark,\n'
                 + (self.INJECT_RULE if rel.endswith("tproxy/nftables.go") else "")
             )
+        for mode in ('nfqueue', 'desync', 'netlink'):
+            directory = root / 'internal/server' / mode
+            directory.mkdir(parents=True)
+            (directory / 'nftables.go').write_text(self.INJECT_RULE)
+        for mode in ('nfqueue', 'desync', 'netlink', 'tproxy', 'redirect'):
+            (root / 'internal/server' / mode / 'iptables.go').write_text(
+                '"--mark", strconv.Itoa(base.SO_INJECT_MARK),\n')
+        (root / 'internal/server/nfqueue/nfqueue_linux.go').write_text(
+            'func (s *Server) getNextMark(packet *common.Packet, result *common.RewriteDecision) (setMark bool, mark uint32) {\n'
+            '\tmark, found := packet.GetCtMark()\n}\n')
         return root
 
     def test_confines_ua3f_marks_to_the_low_16_bits(self):
