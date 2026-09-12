@@ -29,6 +29,10 @@ printf '%s\n%s\n' password password | passwd root
 uci -q set system.@system[0].hostname='DESKTOP-ACRH17'
 uci -q set system.@system[0].zonename='Asia/Shanghai'
 uci -q set system.@system[0].timezone='CST-8'
+# config_generate wipes system.ntp and seeds four openwrt.pool.ntp.org entries
+# before uci-defaults runs, so appending would leave seven servers on every
+# first boot with the unreachable foreign pool tried first.
+uci -q delete system.ntp.server
 uci -q add_list system.ntp.server='ntp.aliyun.com'
 uci -q add_list system.ntp.server='ntp.tencent.com'
 uci -q add_list system.ntp.server='pool.ntp.org'
