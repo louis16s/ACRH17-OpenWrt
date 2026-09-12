@@ -20,7 +20,14 @@ text = text.replace(marker, marker + '''
 	fi
 ''')
 # This service changes firewall/sysctl/module state only, never DNS settings.
+# Upstream nests one instance under two tabs inside the restart_utils block of
+# start()/stop() and one under a single tab in restart(), so both spellings have
+# to go in this order: the single-tab pattern also matches the tail of the
+# double-tab line and would leave a stray tab behind.
 text = text.replace('\t\t/etc/init.d/dnsmasq restart >"/dev/null" 2>&1\n', '')
 text = text.replace('\t/etc/init.d/dnsmasq restart >"/dev/null" 2>&1\n', '')
+assert '/etc/init.d/dnsmasq restart' not in text, 'TurboACC runtime changed'
+for word in ('DNSMASQ change', 'DNSMASQ revert', 'DNSMASQ restart'):
+    assert word in text, f'TurboACC runtime changed: {word} missing'
 text = text.replace('DNSMASQ change', 'Firewall change').replace('DNSMASQ revert', 'Firewall revert').replace('DNSMASQ restart', 'Firewall restart')
 path.write_text(text)
