@@ -17,23 +17,37 @@ concurrency:
   group: acrh17-matrix-${{ github.repository }}
   cancel-in-progress: true
 jobs:
+  resolve:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.refs.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: refs
+        name: Resolve immutable variant commits
+        run: |
+          python3 - <<'PYTHON'
+          import json, os, subprocess
+          variants = [
+              ('openwrt-campus', 'codex/openwrt-24.10', 'OpenWrt 24.10 Campus · mwan3'),
+              ('immortalwrt-campus', 'codex/immortalwrt-24.10', 'ImmortalWrt 24.10 Campus · mwan3'),
+              ('openwrt-singlewan', 'codex/openwrt-24.10-singlewan', 'OpenWrt 24.10 Single WAN'),
+              ('immortalwrt-singlewan', 'codex/immortalwrt-24.10-singlewan', 'ImmortalWrt 24.10 Single WAN'),
+          ]
+          refs = dict(line.split()[::-1] for line in subprocess.check_output(
+              ['git', 'ls-remote', 'origin', *['refs/heads/' + ref for _, ref, _ in variants]], text=True).splitlines())
+          matrix = {'include': [dict(id=id, ref=ref, label=label,
+              sha=os.environ['GITHUB_SHA'] if ref == os.environ['GITHUB_REF_NAME'] else refs['refs/heads/' + ref])
+              for id, ref, label in variants]}
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('matrix=' + json.dumps(matrix) + '\n')
+          print(json.dumps(matrix, indent=2))
+          PYTHON
   build:
+    needs: resolve
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - id: openwrt-campus
-            ref: codex/openwrt-24.10
-            label: OpenWrt 24.10 Campus · mwan3
-          - id: immortalwrt-campus
-            ref: codex/immortalwrt-24.10
-            label: ImmortalWrt 24.10 Campus · mwan3
-          - id: openwrt-singlewan
-            ref: codex/openwrt-24.10-singlewan
-            label: OpenWrt 24.10 Single WAN
-          - id: immortalwrt-singlewan
-            ref: codex/immortalwrt-24.10-singlewan
-            label: ImmortalWrt 24.10 Single WAN
+      matrix: ${{ fromJSON(needs.resolve.outputs.matrix) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 360
     env:
@@ -48,7 +62,7 @@ jobs:
       - name: Checkout project variant
         uses: actions/checkout@v7
         with:
-          ref: ${{ matrix.ref }}
+          ref: ${{ matrix.sha }}
           path: project
 
       - name: Install build dependencies
@@ -60,14 +74,7 @@ jobs:
       - name: Validate project scripts
         working-directory: project
         run: |
-          sh -n scripts/prepare.sh
-          sh -n files/etc/uci-defaults/90-acrh17
-          sh -n files/usr/libexec/acrh17-usbwan-redial
-          sh -n files/usr/libexec/acrh17-usb-net-status
-          sh -n package/ruijie-auth/files/usr/libexec/ruijie-auth
-          sh -n package/ruijie-auth/files/etc/init.d/ruijie-auth
-          find package -name '*.lua' -exec luac -p {} \;
-          python3 -m unittest discover -s tests -v
+          python3 scripts/validate-project.py
 
       - name: Checkout pinned OpenWrt and feeds
         working-directory: project
@@ -236,6 +243,8 @@ jobs:
             find release-input -maxdepth 3 -type f -print >&2
             exit 1
           }
+          (cd release-assets && sha256sum *.bin > sha256sums)
+          assets+=(release-assets/sha256sums)
           tag="build-${GITHUB_RUN_ID}"
           title="RT-ACRH17 firmware build ${GITHUB_RUN_ID}"
           cat > release-notes.md <<EOF
@@ -245,5 +254,6 @@ jobs:
           EOF
           gh release create "$tag" "${assets[@]}" \
             --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
             --title "$title" \
             --notes-file release-notes.md

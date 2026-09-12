@@ -184,3 +184,58 @@ exec 3>&1
 ''')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.split(), ['30', 'LOGIN', '60'])
+
+class RecoveryRegressionTests(unittest.TestCase):
+    run_loop = RecoveryTests.run_loop
+    def test_lock_contention_never_renews_wan(self):
+        result = self.run_loop('''get() {
+case "$1" in boot_login|auto_reconnect) echo 1;; max_failures) echo 1;; failure_action) echo restart_wan;; esac
+}
+wan_ready() { return 0; }
+status() { return 1; }
+portal() { return 75; }
+renew_wan() { echo UNEXPECTED_RENEW; }
+save_state() { :; }
+COUNT=0
+sleep() { COUNT=$((COUNT+1)); [ "$COUNT" -lt 3 ] || exit 0; }
+''')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn('UNEXPECTED_RENEW', result.stdout)
+
+    def test_online_probe_refreshes_state(self):
+        result = self.run_loop('''get() { echo 1; }
+wan_ready() { return 0; }
+status() { return 0; }
+save_state() { echo "$1"; }
+sleep() { exit 0; }
+''')
+        self.assertEqual(result.stdout.strip(), 'online')
+
+    def test_reauth_waits_for_dhcp(self):
+        definitions = SCRIPT.read_text().rsplit('\ncase "$1" in', 1)[0]
+        result = subprocess.run(['sh', '-c', definitions + '''
+get() { echo 1; }
+save_state() { :; }
+portal_request() { echo "$1"; }
+READY=0
+renew_wan_request() { echo renew; READY=0; }
+wan_ready() { [ "$READY" -ge 2 ]; }
+sleep() { READY=$((READY+1)); }
+reauth_request
+'''], capture_output=True, text=True, timeout=5)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.split(), ['renew', 'login'])
+
+    def test_reauth_dhcp_timeout_stops_login(self):
+        definitions = SCRIPT.read_text().rsplit('\ncase "$1" in', 1)[0]
+        result = subprocess.run(['sh', '-c', definitions + '''
+get() { echo 1; }
+save_state() { :; }
+portal_request() { echo "$1"; }
+renew_wan_request() { return 0; }
+wan_ready() { return 1; }
+sleep() { :; }
+reauth_request
+'''], capture_output=True, text=True, timeout=5)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn('login', result.stdout)

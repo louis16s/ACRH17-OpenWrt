@@ -9,7 +9,9 @@ for suffix in suffixes:
     print(images[0].name, images[0].stat().st_size, 'bytes')
     if suffix == 'squashfs-sysupgrade.bin':
         assert images[0].stat().st_size <= 20439364, 'Official device image size exceeded'
-manifest = next(p.glob('*.manifest')).read_text()
+manifests = list(p.glob('*.manifest'))
+assert len(manifests) == 1, 'Expected exactly one firmware manifest'
+manifest = manifests[0].read_text()
 packages = {line.split()[0] for line in manifest.splitlines() if line.strip()}
 required = {
     line.split('CONFIG_PACKAGE_', 1)[1].split('=')[0]
@@ -27,3 +29,6 @@ for line in Path('configs/acrh17.config').read_text().splitlines():
     if line.startswith('# CONFIG_PACKAGE_') and line.endswith(' is not set') and '_INCLUDE_' not in line:
         name = line.split('CONFIG_PACKAGE_', 1)[1].split()[0]
         assert name not in packages, 'Excluded package installed: ' + name
+
+providers = {name for name in packages if name.startswith('libustream-')}
+assert len(providers) == 1, 'Expected one libustream provider: ' + str(providers)
