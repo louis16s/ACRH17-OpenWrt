@@ -20,6 +20,7 @@ config_get bbr_cca config bbr_cca 0
 \tconfig_get "fullcone6" "config" "fullcone6" "0"
 }
 restart() {
+: # Other runtime work remains after DNS restart is removed.
 \t/etc/init.d/dnsmasq restart >"/dev/null" 2>&1
 }
 ''')
