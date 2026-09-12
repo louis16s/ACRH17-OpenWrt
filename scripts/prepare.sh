@@ -1,6 +1,9 @@
 #!/bin/sh
 set -eu
 # Invoke with the OpenWrt source tree as the working directory.
+# The space after CDPATH= scopes the empty value to cd and keeps a user's
+# CDPATH from making cd print a path of its own; it is not a typo.
+# shellcheck disable=SC1007
 PROJECT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 . "$PROJECT/sources.env"
 [ -f include/toplevel.mk ] || { echo 'Run inside an OpenWrt source tree' >&2; exit 1; }
