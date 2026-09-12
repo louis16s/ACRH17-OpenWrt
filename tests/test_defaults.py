@@ -78,6 +78,18 @@ esac
                     if line.endswith(' disable')}
         self.assertEqual(disabled, {'watchcat', 'ddns', 'mwan3'})
 
+    def test_p910nd_driver_blobs_survive_upgrade(self):
+        # The p910nd hotplug script appends /opt/p910nd_drivers to
+        # /etc/sysupgrade.conf, but that file is itself in no keep.d entry, so
+        # the entry is cleared by the first upgrade and the blobs are dropped by
+        # the next one. Keep the directory directly.
+        keep = (ROOT / 'files/lib/upgrade/keep.d/acrh17').read_text()
+        # sysupgrade strips comments and blank lines before calling find, so the
+        # path has to survive that filter.
+        listed = {line for line in keep.splitlines()
+                  if line.strip() and not line.startswith('#')}
+        self.assertIn('/opt/p910nd_drivers', listed)
+
     def test_excluded_package_cannot_reappear(self):
         with tempfile.TemporaryDirectory() as d:
             requested, resolved = Path(d) / 'requested', Path(d) / 'resolved'
