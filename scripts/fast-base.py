@@ -14,6 +14,8 @@ def signature():
 
 if __name__ == '__main__':
     mode, directory = sys.argv[1:3]
+    if mode not in ('stamp', 'check'):
+        raise SystemExit('Expected stamp or check')
     path = Path(directory) / 'compatibility.json'
     if mode == 'stamp':
         path.write_text(json.dumps(signature(), indent=2))

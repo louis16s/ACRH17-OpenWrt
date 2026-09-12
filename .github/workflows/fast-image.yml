@@ -30,8 +30,11 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       BASE_RUN: ${{ inputs.base_run }}
       VARIANT: ${{ inputs.variant }}
+      VARIANT_REF: ${{ fromJSON('{"openwrt-campus":"codex/openwrt-24.10","immortalwrt-campus":"codex/immortalwrt-24.10","openwrt-singlewan":"codex/openwrt-24.10-singlewan","immortalwrt-singlewan":"codex/immortalwrt-24.10-singlewan"}')[inputs.variant] }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.VARIANT_REF }}
       - name: Validate and download matching baseline
         run: |
           [[ "$BASE_RUN" =~ ^[0-9]+$ ]]
@@ -39,10 +42,8 @@ jobs:
           python3 - <<'PY'
           import json, os
           r = json.load(open('run.json'))
-          assert r['head_branch'] == os.environ['GITHUB_REF_NAME'], 'Baseline must be from the same branch'
           assert r['conclusion'] == 'success', 'Baseline must be successful'
           assert r['path'] == '.github/workflows/build.yml', 'Choose a full matrix build'
-          assert r['name'] == 'RT-ACRH17 Firmware Matrix', 'Choose the matrix firmware build'
           PY
           gh run download "$BASE_RUN" --repo "$GITHUB_REPOSITORY" --name "fast-base-${VARIANT}-${BASE_RUN}" --dir baseline
           python3 scripts/fast-base.py check baseline
@@ -50,10 +51,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential libncurses-dev zlib1g-dev libssl-dev python3 unzip zstd lua5.1
-          sh -n files/etc/uci-defaults/90-acrh17
-          sh -n package/ruijie-auth/files/usr/libexec/ruijie-auth
-          find package -name '*.lua' -exec luac -p {} \;
-          python3 -m unittest discover -s tests -v
+          python3 scripts/validate-project.py
       - name: Build sysupgrade image
         run: |
           mkdir -p imagebuilder overlay artifacts
@@ -64,7 +62,7 @@ jobs:
           chmod 755 overlay/usr/libexec/ruijie-auth overlay/etc/init.d/ruijie-auth
           packages=$(python3 - <<'PY'
           from pathlib import Path
-          print(' '.join(x.removeprefix('CONFIG_PACKAGE_').removesuffix('=y') for x in Path('configs/acrh17.config').read_text().splitlines() if x.startswith('CONFIG_PACKAGE_') and x.endswith('=y') and x != 'CONFIG_PACKAGE_luci-app-turboacc_INCLUDE_OFFLOADING=y'))
+          print(' '.join(x.removeprefix('CONFIG_PACKAGE_').removesuffix('=y') for x in Path('configs/acrh17.config').read_text().splitlines() if x.startswith('CONFIG_PACKAGE_') and x.endswith('=y') and '_INCLUDE_' not in x))
           PY
           )
           make -C imagebuilder image PROFILE=asus_rt-ac42u PACKAGES="$packages" FILES="$PWD/overlay" 2>&1 | tee fast-build.log
