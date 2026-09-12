@@ -32,6 +32,30 @@ esac
             f'mwan3.{interface}.track_ip={ip}' for interface in ('wan', 'wanb')
             for ip in ('223.5.5.5', '119.29.29.29', '114.114.114.114')})
 
+    def test_ntp_servers_replace_the_generated_pool(self):
+        # config_generate seeds four openwrt.pool.ntp.org entries before
+        # uci-defaults runs, so the list has to be cleared first; appending
+        # would leave seven servers with the unreachable pool tried first.
+        text = (ROOT / 'files/etc/uci-defaults/90-acrh17').read_text()
+        lines = [line for line in text.splitlines() if 'system.ntp.server' in line]
+        self.assertTrue(lines, 'no system.ntp.server configuration found')
+        mock = '''uci() {
+shift
+case "$1:$2" in
+delete:*) echo "DELETE $2";;
+add_list:*) echo "$2";;
+esac
+}
+'''
+        result = subprocess.run(['sh', '-c', mock + '\n'.join(lines)],
+                                text=True, capture_output=True, check=True)
+        self.assertEqual(result.stdout.splitlines(), [
+            'DELETE system.ntp.server',
+            'system.ntp.server=ntp.aliyun.com',
+            'system.ntp.server=ntp.tencent.com',
+            'system.ntp.server=pool.ntp.org',
+        ])
+
     def test_excluded_package_cannot_reappear(self):
         with tempfile.TemporaryDirectory() as d:
             requested, resolved = Path(d) / 'requested', Path(d) / 'resolved'
