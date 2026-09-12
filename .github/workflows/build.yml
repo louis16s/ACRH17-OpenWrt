@@ -245,7 +245,7 @@ jobs:
             find release-input -maxdepth 3 -type f -print >&2
             exit 1
           }
-          (cd release-assets && sha256sum *.bin > sha256sums)
+          (cd release-assets && sha256sum -- *.bin > sha256sums)
           assets+=(release-assets/sha256sums)
           tag="build-${GITHUB_RUN_ID}"
           title="RT-ACRH17 firmware build ${GITHUB_RUN_ID}"
@@ -254,8 +254,14 @@ jobs:
 
           Only sysupgrade .bin images are attached; use the matching initramfs artifact for first RAM-boot testing when supported by the installed OpBoot version. No ART, EEPROM, Factory, calibration, or bootloader data is included or modified.
           EOF
+          # Assets upload one by one after the release row exists, so a failed or
+          # cancelled upload would leave a partial release visible, and a re-run
+          # would then stop on the tag that attempt left behind.
+          gh release delete "$tag" --yes --cleanup-tag --repo "$GITHUB_REPOSITORY" 2>/dev/null || true
           gh release create "$tag" "${assets[@]}" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
             --title "$title" \
-            --notes-file release-notes.md
+            --notes-file release-notes.md \
+            --draft
+          gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false
