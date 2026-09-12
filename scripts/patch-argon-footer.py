@@ -9,13 +9,19 @@ marker = 'href="https://530555.xyz"'
 # Argon's current Makefile still carries the pre-24.10 conditional
 # ``wget-any`` dependency.  That virtual package is not present in the
 # pinned 24.10 feeds; the non-APK wget dependency is the portable choice.
+# The rewrite is asserted rather than silent: if upstream rewords this line
+# the stale ``wget-any`` dependency would otherwise survive unnoticed and
+# only surface much later as an unresolved-package failure during ``make``.
+OLD_DEPENDS = 'LUCI_DEPENDS:=+USE_APK:wget-any +!USE_APK:wget +jsonfilter'
+NEW_DEPENDS = 'LUCI_DEPENDS:=+!USE_APK:wget +jsonfilter'
 makefile = root / "Makefile"
 make_text = makefile.read_text()
-make_text = make_text.replace(
-    'LUCI_DEPENDS:=+USE_APK:wget-any +!USE_APK:wget +jsonfilter',
-    'LUCI_DEPENDS:=+!USE_APK:wget +jsonfilter',
-)
-makefile.write_text(make_text)
+if OLD_DEPENDS in make_text:
+    makefile.write_text(make_text.replace(OLD_DEPENDS, NEW_DEPENDS))
+elif 'wget-any' in make_text:
+    raise SystemExit(f"Argon LUCI_DEPENDS layout changed, still on wget-any: {makefile}")
+elif NEW_DEPENDS not in make_text:
+    raise SystemExit(f"Argon LUCI_DEPENDS lost its wget dependency: {makefile}")
 
 for name in ("footer.ut", "footer_login.ut"):
     path = root / "ucode/template/themes/argon" / name
