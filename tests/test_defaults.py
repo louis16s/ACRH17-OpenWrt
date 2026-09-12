@@ -15,7 +15,7 @@ class DefaultsTests(unittest.TestCase):
 
     def test_each_existing_uplink_receives_all_probe_targets(self):
         text = (ROOT / 'files/etc/uci-defaults/90-acrh17').read_text()
-        block = text.split('if [ -x /etc/init.d/mwan3 ]; then\n', 1)[1].split('/etc/init.d/mwan3 disable', 1)[0]
+        block = text.split('if [ -x /etc/init.d/mwan3 ]; then\n', 1)[1].split('\nfi\n', 1)[0]
         mock = '''uci() {
 shift
 case "$1:$2" in
@@ -55,6 +55,28 @@ esac
             'system.ntp.server=ntp.tencent.com',
             'system.ntp.server=pool.ntp.org',
         ])
+
+    def test_unused_services_are_disabled_ahead_of_the_guard(self):
+        # /etc/rc.d appears in no keep.d entry and nand_do_upgrade deletes and
+        # recreates the rootfs_data volume, so a disable done here is lost on
+        # every upgrade while the guard below returns early. watchcat would then
+        # ping 8.8.8.8 every 6h and force a reboot, so the disables must sit
+        # ahead of the guard to be re-applied whenever this script reappears.
+        text = (ROOT / 'files/etc/uci-defaults/90-acrh17').read_text()
+        before_guard = text.split("uci -q set network.lan.ipaddr=", 1)[0]
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, 'init.d').mkdir()
+            for service in ('watchcat', 'ddns', 'mwan3', 'smartdns', 'ua3f'):
+                script = Path(d, 'init.d', service)
+                script.write_text(f'echo "{service} $1"\n')
+                script.chmod(0o755)
+            mock = 'chmod() { :; }\nuci() { :; }\nawk() { return 0; }\n'
+            body = '\n'.join(before_guard.replace('/etc/init.d/', './init.d/').splitlines()[1:])
+            result = subprocess.run(['sh', '-c', mock + body], cwd=d,
+                                    text=True, capture_output=True, check=True)
+        disabled = {line.split()[0] for line in result.stdout.splitlines()
+                    if line.endswith(' disable')}
+        self.assertEqual(disabled, {'watchcat', 'ddns', 'mwan3'})
 
     def test_excluded_package_cannot_reappear(self):
         with tempfile.TemporaryDirectory() as d:
