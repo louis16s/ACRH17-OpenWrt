@@ -45,13 +45,13 @@ request() {
 	[ -z "$COOKIE" ] || set -- -H "Cookie: $COOKIE" "$@"
 	[ -z "$REFERER" ] || set -- --referer "$REFERER" "$@"
 	[ -z "$SERVER" ] || set -- -H "Origin: $SERVER" "$@"
-	curl -fsS --noproxy '*' --proto '=http,https' --connect-timeout 5 --max-time 15 \
+	curl -q -4 -fsS --noproxy '*' --proto '=http,https' --connect-timeout 5 --max-time 15 \
 		-H 'User-Agent: Mozilla/5.0' \
 		-H 'Content-Type: application/x-www-form-urlencoded; charset=UTF-8' "$@"
 }
 
 status() {
-	SERVER= COOKIE= REFERER=
+	SERVER='' COOKIE='' REFERER=''
 	# A captive portal check is only useful after the logical WAN is up and
 	# has an IPv4 lease. This avoids a 15s probe followed by another 15s login
 	# request while DHCP is still down.
@@ -67,7 +67,7 @@ status() {
 
 # Serialize manual actions with the existing daemon; flock releases on crash.
 with_lock() (
-	flock -n 9 || { echo 'Authentication action already running'; return 1; }
+	flock -n 9 || { echo 'Authentication action already running'; return 75; }
 	"$@"
 ) 9>/tmp/ruijie-auth.lock
 
@@ -133,7 +133,9 @@ portal_request() {
 	return "$RC"
 }
 
-renew_wan() {
+renew_wan() { with_lock renew_wan_request; }
+
+renew_wan_request() {
 	wan="$(get wan_interface)"
 	case "$wan" in ''|*[!A-Za-z0-9_-]*) echo "Invalid WAN interface"; return 1;; esac
 	if ifdown "$wan" >/dev/null 2>&1 && sleep 2 && ifup "$wan" >/dev/null 2>&1; then
@@ -146,11 +148,26 @@ renew_wan() {
 	return 1
 }
 
+wait_wan() {
+	# ifup returns before DHCP has installed an IPv4 address.
+	attempt=0
+	while [ "$attempt" -lt 15 ]; do
+		wan_ready && return 0
+		sleep 2
+		attempt=$((attempt + 1))
+	done
+	save_state failed failure 'WAN did not acquire IPv4 within 30 seconds'
+	return 1
+}
+
 reauth_request() {
 	save_state authenticating pending 'Reauthentication requested'
 	portal_request logout >/dev/null 2>&1 || true
 	sleep 2
-	[ "$(get renew_dhcp_on_reauth)" = 1 ] && renew_wan || true
+	if [ "$(get renew_dhcp_on_reauth)" = 1 ]; then
+		renew_wan_request || return 1
+		wait_wan || return 1
+	fi
 	portal_request login
 }
 
@@ -185,11 +202,18 @@ daemon() {
 		BOOT_PENDING=0
 		if status >/dev/null 2>&1; then
 			FAILURES=0
+			save_state online success 'Connectivity probe succeeded'
 		else
 			save_state authenticating pending 'Connectivity check failed; authenticating'
 			if portal login >/dev/null 2>&1; then
 				FAILURES=0
 			else
+				# A manual operation owns the lock; this is not an auth failure.
+				RC=$?
+				if [ "$RC" -eq 75 ]; then
+					sleep "$RETRY"
+					continue
+				fi
 				[ "$FAILURES" -ge 99 ] || FAILURES=$((FAILURES + 1))
 				if [ "$FAILURES" -ge "$MAX_FAILURES" ]; then
 					case "$(get failure_action)" in
@@ -207,7 +231,7 @@ daemon() {
 			fi
 		fi
 		# Do not attach authentication headers to the next connectivity probe.
-		SERVER= COOKIE= REFERER=
+		SERVER='' COOKIE='' REFERER=''
 		if [ "$FAILURES" -gt 0 ]; then
 			# With the default retry_interval=30 this is 30s, 45s, 60s,
 			# then 60s for subsequent failures. The value remains tunable.
@@ -229,7 +253,7 @@ case "$1" in
 	status) status;;
 	reauth) reauth;;
 	renew-wan) renew_wan;;
-	clear) clear_results;;
+	clear) with_lock clear_results;;
 	daemon) daemon;;
 	*) echo "Usage: $0 {login|logout|reauth|renew-wan|clear|status|daemon}"; exit 1;;
 esac
