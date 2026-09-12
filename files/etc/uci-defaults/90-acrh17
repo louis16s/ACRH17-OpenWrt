@@ -1,6 +1,14 @@
 #!/bin/sh
 # Only ordinary UCI settings. Preserve the upstream board/radio definitions.
 chmod 600 /etc/config/ruijie
+# /etc/rc.d appears in no keep.d entry and sysupgrade deletes and recreates the
+# rootfs_data volume, so these services come back enabled after every upgrade
+# while the guard below stops this script from re-applying the default. Disable
+# them ahead of the guard, otherwise watchcat pings 8.8.8.8 every 6h and forces
+# a reboot when the probe fails.
+for service in watchcat ddns mwan3; do
+	[ -x "/etc/init.d/$service" ] && /etc/init.d/"$service" disable
+done
 # UCI defaults are reinstalled by sysupgrade. Never overwrite a retained
 # password, LAN/Wi-Fi settings or service choices on an existing installation.
 # Older project images have no marker, but a configured root password is an
@@ -147,12 +155,9 @@ for msection in wan6 wanb6; do
 	uci -q set mwan3."$msection".enabled='0'
 done
 uci -q commit mwan3
-/etc/init.d/mwan3 disable
 fi
 uci -q set p910nd.@p910nd[0].enabled='0'
 uci -q commit p910nd
-/etc/init.d/watchcat disable
-/etc/init.d/ddns disable
 uci -q set irqbalance.irqbalance.enabled='1'
 uci -q commit irqbalance
 /etc/init.d/irqbalance enable
