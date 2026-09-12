@@ -4,21 +4,42 @@ local function trim(value)
 	return (value or ""):gsub("^%s+", ""):gsub("%s+$", "")
 end
 
+-- Read one snapshot per page instead of forking sed/head/uci for each field.
+local fs = require "nixio.fs"
+local json = require "luci.jsonc"
+local cursor = require("luci.model.uci").cursor()
+local state_values = {}
+for line in (fs.readfile("/tmp/ruijie-auth.state") or ""):gmatch("[^\n]+") do
+	local key, value = line:match("^([^=]+)=(.*)$")
+	if key then state_values[key] = value end
+end
 local function state(key)
-	return trim(sys.exec("sed -n 's/^" .. key .. "=//p' /tmp/ruijie-auth.state 2>/dev/null | head -n 1"))
+	return trim(state_values[key])
 end
 
 local function action_result()
-	return trim(sys.exec("sed -n 's/^result=//p' /tmp/ruijie-auth.action 2>/dev/null | tail -n 1"))
+	local result = ""
+	for line in (fs.readfile("/tmp/ruijie-auth.action") or ""):gmatch("[^\n]+") do
+		result = line:match("^result=(.*)$") or result
+	end
+	return result
 end
 
 local function wan_name()
-	local name = trim(sys.exec("uci -q get ruijie.main.wan_interface"))
+	local name = cursor:get("ruijie", "main", "wan_interface") or "wan"
 	return name:match("^[%w_%-]+$") and name or "wan"
 end
-
+local wan_status = json.parse(sys.exec("ubus call network.interface." .. wan_name() .. " status 2>/dev/null")) or {}
 local function wan_ipv4()
-	return trim(sys.exec("ubus call network.interface." .. wan_name() .. " status 2>/dev/null | jsonfilter -e '@[\"ipv4-address\"][0].address'"))
+	return ((wan_status["ipv4-address"] or {})[1] or {}).address or ""
+end
+local function wan_gateway()
+	for _, route in ipairs(wan_status.route or {}) do
+		if route.target == "0.0.0.0" and route.mask == 0 then
+			return route.nexthop or ""
+		end
+	end
+	return ""
 end
 
 m = Map("ruijie", translate("Ruijie ePortal / 锐捷认证"),
@@ -38,11 +59,11 @@ display("service", translate("服务状态"), function() return sys.call("/etc/i
 display("auth", translate("当前认证状态"), function() return ({ online = translate("已联网"), authenticating = translate("正在认证"), failed = translate("认证失败") })[state("auth_state")] or translate("未联网") end)
 display("wan", translate("WAN 接口"), wan_name)
 display("ipv4", translate("WAN IPv4 地址"), wan_ipv4)
-display("gateway", translate("默认网关"), function() return trim(sys.exec("ubus call network.interface." .. wan_name() .. " status 2>/dev/null | jsonfilter -e '@.route[@.target=\"0.0.0.0\"].nexthop' | head -n 1")) end)
+display("gateway", translate("默认网关"), wan_gateway)
 display("last_time", translate("最近认证时间"), function() return state("last_time") end)
 display("last_result", translate("最近一次认证结果"), function() return state("last_result") end)
 display("last_summary", translate("最近认证返回内容摘要"), function() return state("last_summary") end)
-display("reconnect", translate("自动重连"), function() return trim(sys.exec("uci -q get ruijie.main.auto_reconnect")) == "1" and translate("已启用") or translate("未启用") end)
+display("reconnect", translate("自动重连"), function() return cursor:get("ruijie", "main", "auto_reconnect") == "1" and translate("已启用") or translate("未启用") end)
 display("action_result", translate("最近快捷操作"), function()
 	local result = action_result()
 	return ({ success = translate("成功"), failed = translate("失败"), running = translate("正在执行") })[result] or "-"
@@ -54,7 +75,7 @@ local function action(name, title, command, style)
 	local button = actions:option(Button, name, title)
 	button.inputstyle = style or "apply"
 	function button.write()
-		sys.call("(umask 077; printf 'result=running\\n' >/tmp/ruijie-auth.action; " .. command .. " >>/tmp/ruijie-auth.action 2>&1; rc=$?; [ $rc -eq 0 ] && printf 'result=success\\n' >>/tmp/ruijie-auth.action || printf 'result=failed\\n' >>/tmp/ruijie-auth.action; logger -t ruijie-auth 'LuCI action completed') &")
+		sys.call("(umask 077; flock -n 8 || exit 75; printf 'result=running\\n' >/tmp/ruijie-auth.action; " .. command .. " >>/tmp/ruijie-auth.action 2>&1; rc=$?; [ $rc -eq 0 ] && printf 'result=success\\n' >>/tmp/ruijie-auth.action || printf 'result=failed\\n' >>/tmp/ruijie-auth.action; logger -t ruijie-auth 'LuCI action completed') 8>/tmp/ruijie-auth.action.lock </dev/null >/dev/null 2>&1 &")
 		m.message = translate("操作已提交。认证请求在后台以短超时执行；刷新页面可查看明确结果。")
 	end
 end
