@@ -32,6 +32,7 @@ UA3F、mwan3、SmartDNS、TurboACC 直接相关的实现。并非逐行审查整
 | 严重度 | 问题与影响 | 修复 |
 | --- | --- | --- |
 | 高 | sysupgrade 重新安装 uci-defaults，原逻辑重设 root 密码、LAN/Wi-Fi 并禁用服务 | 持久初始化标记；旧安装通过已配置 root 密码识别，保留已有设置 |
+| 高 | 上一条的持久标记把「禁用服务」一并跳过：`/etc/rc.d` 不在任何 keep.d 条目中，且 `nand_do_upgrade` 会删除并重建 rootfs_data，因此 `disable` 在每次升级后失效，watchcat 复活后以 8.8.8.8 每 6 小时探测、失败即强制重启 | 将 watchcat、ddns、mwan3 的 `disable` 移到幂等守卫之前，使其在每次升级后重新生效，并加回归测试锁定位置 |
 | 高 | UA3F NFQUEUE 读取完整 ct mark，并在 verdict 中覆盖 mwan3 高位，导致分类/选路失效 | UA3F 只比较低 16 位，所有更新保留高位；覆盖 skip/cache/modified 等返回路径 |
 | 高 | 辅助 NFQUEUE、desync、netlink、sidecar 和 iptables 回退规则未完整遵守 mark 掩码 | 同步修复比较及赋值；TPROXY 路由优先级 100 和掩码保持一致 |
 | 高 | UI 可重新启用 TurboACC 流卸载，与 UA3F/策略路由冲突 | UA3F 或已启用 mwan3 存在时，TurboACC 有效配置关闭软件/硬件/SFE 卸载 |
@@ -44,8 +45,12 @@ UA3F、mwan3、SmartDNS、TurboACC 直接相关的实现。并非逐行审查整
 | 中 | 构建用 find -exec luac，单文件语法失败未必传递为 find 失败 | 统一 Python 校验器，逐文件检查退出码并运行回归测试 |
 | 中 | 镜像验证只查存在和体积、manifest 用不明确 glob | 增加哈希、FIT/tar/SquashFS 结构；明确选设备 manifest，检查 SSL 提供者冲突 |
 | 中 | 四个 job 分别检出移动分支，Release tag 未固定触发提交 | 启动时一次解析四个 SHA；按 SHA 检出；Release 固定 target 并附带 SHA-256 文件 |
-| 低 | TurboACC 启停无 DNS 配置改动却多次重启 dnsmasq | 移除多余 DNS 重启，保留防火墙更新 |
+| 低 | TurboACC 启停无 DNS 配置改动却多次重启 dnsmasq | 移除多余 DNS 重启，保留防火墙更新；并针对上游两处缩进形态（双 tab ×2、单 tab ×1）与三个 `DNSMASQ` 词串加断言，pin 升级后不再匹配时立即失败而非静默失效 |
 | 低 | SmartDNS 缺少明确的设备监听和内存预算 | 新安装只绑定回环设备，1024 条缓存且不持久写盘；保留 dnsmasq 53 / SmartDNS 6053 分工 |
+| 低 | p910nd 热插拔脚本把 `/opt/p910nd_drivers` 追加到 `/etc/sysupgrade.conf`，但该文件本身不在任何 keep.d 条目中，首次升级即被清空，打印机驱动 blob 会在第二次升级时丢失 | 在 `files/lib/upgrade/keep.d/acrh17` 中直接保留该目录，并加回归测试锁定 |
+| 中 | `fast-image.yml` 的 `make image \| tee` 未启用 `pipefail`，`tee` 的 0 掩盖编译失败，验证步骤对上一次的完整产物照常通过，任务错误变绿，失败只留在日志里 | 该步骤补 `set -o pipefail`，与 `build.yml` 四处管道步骤保持一致 |
+| 低 | Release 由 `gh release create` 先建记录再逐条上传资产，上传失败或被新提交取消会留下可见的残缺 release，同一 run 重跑还会撞上上次留下的 tag | 上传前清理同名残留，改为 draft 创建、资产齐备后再 publish |
+| 低 | ShellCheck 有两处残留告警：`prepare.sh` 的 `CDPATH= cd` 被误判为赋值笔误（SC1007），`routing-netns.sh` 的重试变量由 `seq` 展开、既被判未使用（SC2034）又在 zsh 下只迭代一次 | 前者加定向 disable 注释并说明空格用途，后者改为算术 `for` 循环，bash 与 zsh 下都迭代 20 次 |
 
 保留当前源码锁、无线驱动、设备树和分区布局。BBR 主要影响路由器自身终结的 TCP，
 不能据此承诺转发速度提升；此次没有缺乏实测依据的频率、缓冲区或硬件卸载调整。
