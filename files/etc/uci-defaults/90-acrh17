@@ -1,6 +1,16 @@
 #!/bin/sh
 # Only ordinary UCI settings. Preserve the upstream board/radio definitions.
 chmod 600 /etc/config/ruijie
+# UCI defaults are reinstalled by sysupgrade. Never overwrite a retained
+# password, LAN/Wi-Fi settings or service choices on an existing installation.
+# Older project images have no marker, but a configured root password is an
+# upgrade signal (the pinned clean images have an empty root password).
+if [ "$(uci -q get acrh17.settings.defaults_applied)" = 1 ] ||
+   awk -F: '$1 == "root" && $2 != "" { found=1 } END { exit !found }' /etc/shadow; then
+	uci -q set acrh17.settings.defaults_applied='1'
+	uci -q commit acrh17
+	exit 0
+fi
 uci -q set network.lan.ipaddr='192.168.5.1'
 # IPv4-only operation: stop WAN6 and prevent LAN RA/DHCPv6 advertisements.
 uci -q set network.lan.ip6assign='0'
@@ -172,4 +182,6 @@ uci -q add luci command
 uci -q set luci.@command[-1].name='查看 USB 网络驱动状态'
 uci -q set luci.@command[-1].command='/usr/libexec/acrh17-usb-net-status'
 uci -q commit luci
+uci -q set acrh17.settings.defaults_applied='1'
+uci -q commit acrh17
 exit 0

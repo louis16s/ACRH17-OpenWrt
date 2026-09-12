@@ -40,6 +40,9 @@ class PortalTests(unittest.TestCase):
         cls.server.shutdown()
         cls.server.server_close()
     def setUp(self):
+        Handler.code = 204
+        Handler.result = 'success'
+        Handler.received = None
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         p = Path(self.temp.name)
@@ -144,6 +147,24 @@ elif expr == "@.l3_device": print(data.get("l3_device", ""))
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('already running', result.stdout)
             self.assertIsNone(Handler.received)
+
+
+    def test_curlrc_cannot_override_portal_request(self):
+        (Path(self.temp.name) / '.curlrc').write_text('header = "X-Curlrc: must-not-send"\n')
+        self.env['CURL_HOME'] = self.temp.name
+        self.assertEqual(self.run_auth('login').returncode, 0)
+        self.assertNotIn('X-Curlrc', Handler.received[0])
+
+    def test_renew_and_clear_share_authentication_lock(self):
+        state = Path(self.temp.name) / 'ruijie-auth.state'
+        state.write_text('auth_state=online\n')
+        with open(Path(self.temp.name) / 'ruijie-auth.lock', 'w') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            for action in ('renew-wan', 'clear'):
+                result = self.run_auth(action)
+                self.assertEqual(result.returncode, 75)
+                self.assertIn('already running', result.stdout)
+            self.assertTrue(state.exists())
 
 
 class RecoveryTests(unittest.TestCase):
