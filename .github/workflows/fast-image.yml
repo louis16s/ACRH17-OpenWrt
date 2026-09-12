@@ -54,6 +54,7 @@ jobs:
           python3 scripts/validate-project.py
       - name: Build sysupgrade image
         run: |
+          set -o pipefail
           mkdir -p imagebuilder overlay artifacts
           tar --zstd -xf baseline/*imagebuilder*.tar.zst --strip-components=1 -C imagebuilder
           cp -a files/. overlay/
