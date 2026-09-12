@@ -1,0 +1,5 @@
+# p910nd's hotplug script stores printer driver blobs here and appends the path
+# to /etc/sysupgrade.conf. That file is itself in no keep.d entry, so the entry
+# is cleared by the first upgrade and the directory would be dropped by the next
+# one. Keep the directory directly instead of relying on that entry.
+/opt/p910nd_drivers
