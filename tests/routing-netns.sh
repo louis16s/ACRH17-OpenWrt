@@ -77,7 +77,7 @@ ipt -A TEST_MWAN -j CONNMARK --restore-mark --nfmask 0x3f000000 --ctmask 0x3f000
 ipt -A TEST_MWAN -m mark --mark 0/0x3f000000 -j MARK --set-xmark 0x01000000/0x3f000000
 ipt -A TEST_MWAN -j CONNMARK --save-mark --nfmask 0x3f000000 --ctmask 0x3f000000
 ip netns exec acr-router "$BIN" -m TPROXY -f ROUTING-TEST -l DEBUG >"$LOG/ua3f.log" 2>&1 &
-for attempt in $(seq 1 20); do
+for ((attempt = 1; attempt <= 20; attempt++)); do
   if ip netns exec acr-router nft list table inet UA3F >"$LOG/nft-rules.txt" 2>/dev/null; then break; fi
   sleep 1
 done
