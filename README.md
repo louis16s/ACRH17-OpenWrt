@@ -19,7 +19,7 @@ routing 和 UA3F 的提交固定在 `sources.env`。
 | USB 打印 | `kmod-usb-printer`、`p910nd`、`luci-app-p910nd` |
 | 内存与 TCP | BBR、FQ（24.10 的 `kmod-sched`）、64 MiB zram 逻辑容量 |
 | 时间与 DNS | UTC+8（Asia/Shanghai）、阿里/腾讯/公共 NTP、SmartDNS 与 LuCI 管理页（本地 6053 端口） |
-| 维护工具 | watchcat、LuCI 命令、irqbalance、DDNS、TurboACC；watchcat 与 DDNS 默认关闭 |
+| 维护工具 | watchcat、LuCI 命令、irqbalance、DDNS、TurboACC；watchcat 与 DDNS 默认关闭，升级后保持关闭 |
 
 256 MB RAM 是运行预算；128 MB Flash 并非全部可供镜像使用。
 官方设备定义的 `IMAGE_SIZE` 为 **20,439,364 bytes（约 19.5 MiB）**。
@@ -190,8 +190,10 @@ WAN、重启 p910nd、查看 USB 设备及查看 USB 网络驱动状态。USB WA
 接口名为 `usbwan`，可通过 `acrh17.settings.usbwan_interface` 调整；命令不会
 重启校园 WAN。
 
-watchcat 已编译但默认关闭，也没有预置实例。建议仅为校园主 WAN 建立一个
-检测实例，并将断线动作设置为重启该网络接口。检测目标使用学校可访问的稳定
+watchcat 已编译但默认关闭，也没有预置实例。升级保留配置时禁用状态会被重新
+应用（`/etc/rc.d` 不在任何保留清单内，重建 rootfs 会让它复位），不会意外
+启用。建议仅为校园主 WAN 建立一个检测实例，并将断线动作设置为重启该网络
+接口。检测目标使用学校可访问的稳定
 IP 或 URL；不要把 Google、Cloudflare 等作为校园网络唯一检测目标。需要监测
 F50 时另建 USB WAN 实例，不要默认同时运行多个实例。
 
