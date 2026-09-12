@@ -25,5 +25,6 @@ python3 "$PROJECT/scripts/patch-argon-footer.py" package/luci-theme-argon
 fetch_source https://github.com/chenmozhijin/luci-app-turboacc.git "$TURBOACC_COMMIT" turboacc-source
 cp -R turboacc-source/luci-app-turboacc package/
 python3 "$PROJECT/scripts/patch-turboacc.py" package/luci-app-turboacc/Makefile
+python3 "$PROJECT/scripts/patch-turboacc-runtime.py" package/luci-app-turboacc
 cp -R "$PROJECT/package/ruijie-auth" package/
 cp -R "$PROJECT/files" .
