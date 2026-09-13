@@ -60,7 +60,9 @@ jobs:
           cp -a files/. overlay/
           cp -a package/ruijie-auth/files/. overlay/
           chmod 600 overlay/etc/config/ruijie
-          chmod 755 overlay/usr/libexec/ruijie-auth overlay/etc/init.d/ruijie-auth
+          # The overlay keeps the mode it was copied with, so every script has
+          # to be executable here regardless of what git recorded.
+          chmod 755 overlay/usr/libexec/* overlay/etc/init.d/ruijie-auth
           packages=$(python3 - <<'PY'
           from pathlib import Path
           print(' '.join(x.removeprefix('CONFIG_PACKAGE_').removesuffix('=y') for x in Path('configs/acrh17.config').read_text().splitlines() if x.startswith('CONFIG_PACKAGE_') and x.endswith('=y') and '_INCLUDE_' not in x))
