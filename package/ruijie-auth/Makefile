@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=ruijie-auth
 PKG_VERSION:=1.1.0
-PKG_RELEASE:=3
+PKG_RELEASE:=4
 
 PKGARCH:=all
 
@@ -40,6 +40,8 @@ define Package/ruijie-auth/install
 
 	$(INSTALL_DIR) $(1)/usr/libexec
 	$(INSTALL_BIN) ./files/usr/libexec/ruijie-auth $(1)/usr/libexec/ruijie-auth
+	$(INSTALL_BIN) ./files/usr/libexec/ruijie-refresh-query $(1)/usr/libexec/ruijie-refresh-query
+	$(INSTALL_BIN) ./files/usr/libexec/ruijie-password $(1)/usr/libexec/ruijie-password
 
 	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/controller
 	$(INSTALL_DATA) ./files/usr/lib/lua/luci/controller/ruijie.lua $(1)/usr/lib/lua/luci/controller/ruijie.lua
@@ -49,6 +51,7 @@ define Package/ruijie-auth/install
 
 	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/view/ruijie
 	$(INSTALL_DATA) ./files/usr/lib/lua/luci/view/ruijie/dashboard.htm $(1)/usr/lib/lua/luci/view/ruijie/dashboard.htm
+	$(INSTALL_DATA) ./files/usr/lib/lua/luci/view/ruijie/logs.htm $(1)/usr/lib/lua/luci/view/ruijie/logs.htm
 
 	$(INSTALL_DIR) $(1)/www/luci-static/resources/ruijie
 	$(INSTALL_DATA) ./files/www/luci-static/resources/ruijie/dashboard.css $(1)/www/luci-static/resources/ruijie/dashboard.css

@@ -54,6 +54,13 @@ uci -q add_list dhcp.@dnsmasq[0].server='127.0.0.1#6053'
 uci -q add_list dhcp.@dnsmasq[0].server='223.5.5.5'
 uci -q add_list dhcp.@dnsmasq[0].server='119.29.29.29'
 uci -q add_list dhcp.@dnsmasq[0].server='114.114.114.114'
+# Campus-internal names (mavis.scau.edu.cn and friends) only exist in the
+# campus resolver, and they answer with RFC1918 addresses that dnsmasq's
+# rebinding protection would otherwise discard. Send that one zone to the
+# campus DNS and exempt it from the check; keep the protection for everything
+# else.
+uci -q add_list dhcp.@dnsmasq[0].server='/scau.edu.cn/202.116.160.33'
+uci -q add_list dhcp.@dnsmasq[0].rebind_domain='scau.edu.cn'
 uci -q set smartdns.@smartdns[0].enabled='1'
 uci -q set smartdns.@smartdns[0].port='6053'
 uci -q set smartdns.@smartdns[0].auto_set_dnsmasq='0'
@@ -175,6 +182,9 @@ uci -q commit turboacc
 uci -q add luci command
 uci -q set luci.@command[-1].name='重新认证锐捷'
 uci -q set luci.@command[-1].command='/usr/libexec/ruijie-auth reauth'
+uci -q add luci command
+uci -q set luci.@command[-1].name='刷新锐捷认证参数'
+uci -q set luci.@command[-1].command='/usr/libexec/ruijie-refresh-query capture'
 uci -q add luci command
 uci -q set luci.@command[-1].name='重启 UA3F'
 uci -q set luci.@command[-1].command='/etc/init.d/ua3f restart'

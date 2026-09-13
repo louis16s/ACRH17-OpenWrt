@@ -1,19 +1,61 @@
 <%
+-- Every value below is prepared once in the CBI model: one read of
+-- /tmp/ruijie-auth.state, one ubus call for the WAN.  The template only formats.
+-- data-ruijie-collapse carries the section titles the page script starts folded
+-- ("|" separated), so that list stays beside the model defining those sections.
+-- LuCI templates have no comment tag: "<%--" parses as the whitespace-stripping
+-- "<%-" followed by a stray "-", so notes belong inside a Lua block like this.
 local pcdata = require "luci.xml".pcdata
+
 local auth = self.auth or ""
-local label = ({online="已联网", authenticating="正在认证", failed="认证失败"})[auth] or "未联网"
-local cls = ({online="online", authenticating="working", failed="failed"})[auth] or "offline"
-local service = self.service and "运行中" or "已停止"
-local wan = self.wan or "wan"
-local ip = self.ip or ""
-local last_result = self.last_result or ""
-local last_time = self.last_time or ""
-local last_summary = self.last_summary or ""
+local hero = {
+	online         = { label = "已联网",   cls = "online"  },
+	authenticating = { label = "正在认证", cls = "working" },
+	failed         = { label = "认证失败", cls = "failed"  },
+}
+local state = hero[auth] or { label = "未联网", cls = "offline" }
+
+local function value(v)
+	v = (v == nil) and "" or tostring(v)
+	return v ~= "" and v or "-"
+end
+
+local cards = {
+	{ label = "认证服务",     value = self.service and "运行中" or "已停止",
+	  hint = self.service and "由 procd 管理" or "守护进程未运行" },
+	{ label = "校园 WAN",     value = value(self.wan),
+	  hint = self.ip ~= nil and self.ip ~= "" and self.ip or "尚未获取 IPv4" },
+	{ label = "默认网关",     value = value(self.gateway), hint = "来自 WAN 路由表" },
+	{ label = "最近认证结果", value = value(self.last_result),
+	  hint = value(self.last_time) },
+	{ label = "自动重连",     value = self.reconnect and "已启用" or "未启用",
+	  hint = "断线后由守护进程重新认证" },
+	{ label = "最近快捷操作", value = value(self.action_result),
+	  hint = "页面按钮的执行结果" },
+}
 %>
 <link rel="stylesheet" href="<%=resource%>/ruijie/dashboard.css">
-<script src="<%=resource%>/ruijie/dashboard.js"></script>
-<div class="ruijie-dashboard">
- <div class="ruijie-hero"><div><h3>校园网连接状态</h3><p>实时汇总 WAN、认证服务与最近一次门户响应。</p></div><b class="<%=cls%>"><i></i><%=label%></b></div>
- <div class="ruijie-cards"><div><span>认证服务</span><strong><%=service%></strong><small>由 procd 管理</small></div><div><span>校园 WAN</span><strong><%=pcdata(wan)%></strong><small><%=pcdata(ip ~= "" and ip or "尚未获取 IPv4")%></small></div><div><span>最近结果</span><strong><%=pcdata(last_result ~= "" and last_result or "暂无")%></strong><small><%=pcdata(last_time ~= "" and last_time or "尚无认证记录")%></small></div></div>
- <div class="ruijie-summary"><b>认证摘要</b><span><%=pcdata(last_summary ~= "" and last_summary or "请在下方认证参数区域填写校园门户请求字段")%></span></div>
+<div class="ruijie-dashboard" data-ruijie-collapse="<%=self.collapse or ""%>">
+	<header class="ruijie-hero">
+		<div>
+			<h3>校园网连接状态</h3>
+			<p>实时汇总 WAN、认证服务与最近一次门户响应。</p>
+		</div>
+		<span class="ruijie-pill <%=state.cls%>"><i></i><%=state.label%></span>
+	</header>
+	<div class="ruijie-cards">
+<%
+for _, card in ipairs(cards) do
+	write('<div class="ruijie-card"><span>' .. pcdata(card.label) .. '</span><strong>'
+		.. pcdata(value(card.value)) .. '</strong><small>' .. pcdata(value(card.hint))
+		.. '</small></div>')
+end
+%>
+	</div>
+	<div class="ruijie-summary">
+		<b>认证摘要</b>
+		<span><%=pcdata(value(self.last_summary) ~= "-" and self.last_summary
+			or "请在下方认证参数区域填写校园门户请求字段")%></span>
+	</div>
 </div>
+<script src="<%=resource%>/ruijie/dashboard.js"></script>

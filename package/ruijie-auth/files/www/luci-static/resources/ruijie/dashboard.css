@@ -1,24 +1,41 @@
+/* Ruijie page styling.
+ *
+ * The page owns three surfaces: the connection panel (dashboard.htm), the log
+ * drawer (logs.htm) and the CBI sections around them.  Everything is scoped to
+ * #cbi-ruijie so it cannot leak into the rest of LuCI, and to classes rather
+ * than ids because the Lua CBI model renders several sections on the same
+ * config/section pair and they all end up with id="cbi-ruijie-main".
+ */
+
+#cbi-ruijie {
+	--rj-bg: #111b2d;
+	--rj-panel: rgba(23, 37, 61, .88);
+	--rj-border: rgba(148, 163, 184, .2);
+	--rj-border-strong: rgba(148, 163, 184, .34);
+	--rj-muted: #9fb0c8;
+	--rj-text: #f3f7ff;
+	--rj-accent: #62a7ff;
+	--rj-radius: 16px;
+	--rj-gap: 1rem;
+}
+
+/* ---------------------------------------------------------------- panel -- */
+
 .ruijie-dashboard {
-	--ruijie-bg: #111b2d;
-	--ruijie-panel: rgba(23, 37, 61, .88);
-	--ruijie-border: rgba(148, 163, 184, .2);
-	--ruijie-muted: #9fb0c8;
-	--ruijie-text: #f3f7ff;
-	--ruijie-accent: #62a7ff;
-	margin: 1rem 0 1.5rem;
-	border: 1px solid var(--ruijie-border);
-	border-radius: 16px;
-	background: radial-gradient(circle at 90% -20%, rgba(62, 125, 221, .32), transparent 44%), var(--ruijie-bg);
-	color: var(--ruijie-text);
-	box-shadow: 0 12px 30px rgba(5, 13, 27, .24);
+	margin: 1rem 0 1.25rem;
 	overflow: hidden;
+	border: 1px solid var(--rj-border);
+	border-radius: var(--rj-radius);
+	background: radial-gradient(circle at 90% -20%, rgba(62, 125, 221, .32), transparent 44%), var(--rj-bg);
+	color: var(--rj-text);
+	box-shadow: 0 12px 30px rgba(5, 13, 27, .24);
 }
 
 .ruijie-hero {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	gap: 1rem;
+	gap: var(--rj-gap);
 	padding: 1.35rem 1.5rem 1.2rem;
 }
 
@@ -26,29 +43,23 @@
 	margin: 0;
 	border: 0;
 	background: transparent;
-	color: var(--ruijie-text);
+	color: var(--rj-text);
 	font-size: 1.25rem;
 	font-weight: 650;
 }
 
-.ruijie-hero p,
-.ruijie-cards span,
-.ruijie-cards small {
-	display: block;
-	color: var(--ruijie-muted);
+.ruijie-hero p {
+	margin: .35rem 0 0;
+	color: var(--rj-muted);
 	font-size: .78rem;
 }
 
-.ruijie-hero p {
-	margin: .35rem 0 0;
-}
-
-.ruijie-hero > b {
+.ruijie-pill {
 	display: inline-flex;
 	align-items: center;
 	gap: .5rem;
-	padding: .45rem .75rem;
-	border: 1px solid var(--ruijie-border);
+	padding: .45rem .8rem;
+	border: 1px solid var(--rj-border);
 	border-radius: 999px;
 	background: rgba(255, 255, 255, .06);
 	font-size: .82rem;
@@ -56,38 +67,45 @@
 	white-space: nowrap;
 }
 
-.ruijie-hero i {
+.ruijie-pill i {
 	width: .52rem;
 	height: .52rem;
 	border-radius: 50%;
 	background: #93a4b8;
 }
 
-.ruijie-hero > b.online i { background: #48d597; box-shadow: 0 0 0 4px rgba(72, 213, 151, .15); }
-.ruijie-hero > b.working i { background: #f8c45b; box-shadow: 0 0 0 4px rgba(248, 196, 91, .14); }
-.ruijie-hero > b.failed i,
-.ruijie-hero > b.offline i { background: #ff7b87; box-shadow: 0 0 0 4px rgba(255, 123, 135, .13); }
+.ruijie-pill.online i { background: #48d597; box-shadow: 0 0 0 4px rgba(72, 213, 151, .15); }
+.ruijie-pill.working i { background: #f8c45b; box-shadow: 0 0 0 4px rgba(248, 196, 91, .14); }
+.ruijie-pill.failed i,
+.ruijie-pill.offline i { background: #ff7b87; box-shadow: 0 0 0 4px rgba(255, 123, 135, .13); }
 
 .ruijie-cards {
 	display: grid;
 	grid-template-columns: repeat(3, minmax(0, 1fr));
 	gap: 1px;
-	border-top: 1px solid var(--ruijie-border);
-	border-bottom: 1px solid var(--ruijie-border);
-	background: var(--ruijie-border);
+	border-top: 1px solid var(--rj-border);
+	border-bottom: 1px solid var(--rj-border);
+	background: var(--rj-border);
 }
 
-.ruijie-cards > div {
+.ruijie-card {
 	min-height: 78px;
 	padding: 1rem 1.25rem;
-	background: var(--ruijie-panel);
+	background: var(--rj-panel);
 }
 
-.ruijie-cards strong {
+.ruijie-card span,
+.ruijie-card small {
+	display: block;
+	color: var(--rj-muted);
+	font-size: .78rem;
+}
+
+.ruijie-card strong {
 	display: block;
 	margin: .28rem 0 .18rem;
 	overflow: hidden;
-	color: var(--ruijie-text);
+	color: var(--rj-text);
 	font-size: 1rem;
 	font-weight: 650;
 	text-overflow: ellipsis;
@@ -98,27 +116,116 @@
 	display: grid;
 	grid-template-columns: 6rem minmax(0, 1fr);
 	gap: 1rem;
-	margin: 0;
 	padding: 1rem 1.25rem;
 	background: rgba(6, 14, 28, .34);
 }
 
-.ruijie-summary b { color: var(--ruijie-accent); font-size: .8rem; }
+.ruijie-summary b { color: var(--rj-accent); font-size: .8rem; }
 .ruijie-summary span { overflow-wrap: anywhere; color: #c7d5e8; font-size: .84rem; }
 
-.ruijie-manual-section {
-	border: 1px solid rgba(148, 163, 184, .2);
-	border-radius: 12px;
+/* -------------------------------------------------------- CBI sections -- */
+
+#cbi-ruijie .cbi-section {
+	margin-bottom: 1rem;
+	padding: 1.1rem 1.25rem;
+	border: 1px solid var(--rj-border);
+	border-radius: 14px;
 	background: rgba(17, 27, 45, .5);
 }
 
-.ruijie-manual-section > h3 { margin-bottom: .35rem; }
-.ruijie-manual-toggle { margin: .1rem 0 .8rem; }
+#cbi-ruijie .cbi-section > h3 {
+	margin: 0 0 .35rem;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	font-size: 1rem;
+	font-weight: 650;
+}
+
+#cbi-ruijie .cbi-section-descr {
+	margin-bottom: .8rem;
+	color: var(--rj-muted);
+	font-size: .8rem;
+}
+
+#cbi-ruijie .cbi-section > .cbi-section-node { padding: 0; }
+
+/* Action rows carry only a button: the CBI value header drops the label when
+ * the option has no title, so one grid cell per button is all that is left. */
+#cbi-ruijie .ruijie-actions .cbi-section-node {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr));
+	gap: .55rem;
+}
+
+#cbi-ruijie .ruijie-actions .cbi-value {
+	margin: 0;
+	padding: 0;
+	border: 0;
+	background: none;
+}
+
+#cbi-ruijie .ruijie-actions .btn {
+	width: 100%;
+	height: 100%;
+	min-height: 2.6rem;
+}
+
+/* Manual sections stay out of the way until they are needed. */
+#cbi-ruijie .ruijie-collapsible > .cbi-section-node[hidden] { display: none !important; }
+#cbi-ruijie .ruijie-collapse-toggle { margin: 0 0 .8rem; }
+
+/* ------------------------------------------------------------ log view -- */
+
+.ruijie-logs {
+	margin: 0 0 1.25rem;
+	border: 1px solid var(--rj-border);
+	border-radius: 14px;
+	background: rgba(6, 14, 28, .5);
+	overflow: hidden;
+}
+
+.ruijie-logs > summary {
+	padding: .85rem 1.25rem;
+	color: var(--rj-text);
+	font-size: .95rem;
+	font-weight: 650;
+	cursor: pointer;
+	list-style: none;
+}
+
+.ruijie-logs > summary::-webkit-details-marker { display: none; }
+.ruijie-logs > summary::before {
+	display: inline-block;
+	width: 1rem;
+	color: var(--rj-accent);
+	content: "▸";
+}
+
+.ruijie-logs[open] > summary::before { content: "▾"; }
+.ruijie-logs > summary:hover { background: rgba(255, 255, 255, .04); }
+
+.ruijie-logs pre {
+	max-height: 22rem;
+	margin: 0;
+	padding: 1rem 1.25rem;
+	overflow: auto;
+	border-top: 1px solid var(--rj-border);
+	color: #c7d5e8;
+	font-size: .74rem;
+	line-height: 1.55;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+/* --------------------------------------------------------- responsive -- */
+
+@media (max-width: 900px) {
+	.ruijie-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 
 @media (max-width: 700px) {
 	.ruijie-hero { align-items: flex-start; flex-direction: column; }
 	.ruijie-cards { grid-template-columns: 1fr; }
 	.ruijie-summary { grid-template-columns: 1fr; gap: .35rem; }
 }
-
-.ruijie-manual-section .cbi-section-node[hidden] { display: none !important; }
