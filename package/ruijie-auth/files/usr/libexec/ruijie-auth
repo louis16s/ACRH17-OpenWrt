@@ -76,6 +76,12 @@ reauth() { with_lock reauth_request; }
 
 portal_request() {
 	ACTION="$1"
+	# Whether the link was believed to be up before this attempt. The portal
+	# refuses a login it already holds, and the user can press the button on a
+	# working link, so a rejected request only means "down" when nothing had
+	# said we were up.
+	WAS_ONLINE=0
+	grep -q '^auth_state=online$' "$STATE" 2>/dev/null && WAS_ONLINE=1
 	if ! wan_ready; then
 		save_state authenticating pending 'WAN is not ready; waiting for IPv4 before portal request'
 		echo 'ERROR: WAN is not up or has no IPv4 address'
@@ -119,12 +125,18 @@ portal_request() {
 	mv -f "$RESPONSE" "$LAST"
 	if [ "$RC" = 0 ]; then
 		if [ "$ACTION" = logout ]; then
-            save_state offline success "$(cat "$LAST")"
-        elif status >/dev/null 2>&1; then
-            save_state online success "$(cat "$LAST")"
-        else
-            save_state offline success "Portal accepted login; Internet probe has not succeeded"
-        fi
+			save_state offline success "$(cat "$LAST")"
+		elif status >/dev/null 2>&1; then
+			save_state online success "$(cat "$LAST")"
+		else
+			save_state offline success "Portal accepted login; Internet probe has not succeeded"
+		fi
+	elif [ "$WAS_ONLINE" = 1 ] && status >/dev/null 2>&1; then
+		# Still reachable: the portal turned down a duplicate login, or the
+		# logout did not take. Record the attempt in last_result without
+		# claiming the link went down. The daemon only reaches this point after
+		# its own probe has already failed, so it never pays for a second one.
+		save_state online failure "$(cat "$LAST")"
 	else
 		save_state failed failure "$(cat "$LAST")"
 	fi
@@ -172,9 +184,30 @@ reauth_request() {
 }
 
 clear_results() {
-	rm -f "$LAST" "$STATE"
+	rm -f "$LAST" "$STATE" /tmp/ruijie-auth.action
 	logger -t ruijie-auth 'cleared recent authentication results'
 	echo 'recent authentication results cleared'
+}
+
+# The portal's redirect carries a fresh query string, but it only exists while
+# the link is unauthenticated -- exactly the state a failed login leaves
+# behind. Without this a stale string would be retried identically forever.
+refresh_query_login() {
+	[ "$(get auto_refresh_query)" = 1 ] || return 1
+	OLD_QUERY="$(get query_string)"
+	/usr/libexec/ruijie-refresh-query capture >/dev/null 2>&1 || return 1
+	[ "$(get query_string)" != "$OLD_QUERY" ] || return 1
+	logger -t ruijie-auth 'query-string refreshed; retrying login'
+	portal login >/dev/null 2>&1
+	RC=$?
+	# A capture that does not authenticate is worse than the string it replaced,
+	# so put the previous one back and let the ordinary retry path continue.
+	if [ "$RC" -eq 1 ] && [ -n "$OLD_QUERY" ]; then
+		uci set "ruijie.main.query_string=$OLD_QUERY"
+		uci commit ruijie
+		logger -t ruijie-auth 'login with the refreshed query string failed; restored the previous value'
+	fi
+	return "$RC"
 }
 
 daemon() {
@@ -185,6 +218,7 @@ daemon() {
 	[ "$RETRY" -ge 10 ] 2>/dev/null && [ "$RETRY" -le 60 ] 2>/dev/null || RETRY=30
 	[ "$MAX_FAILURES" -ge 1 ] 2>/dev/null && [ "$MAX_FAILURES" -le 99 ] 2>/dev/null || MAX_FAILURES=3
 	FAILURES=0
+	WAN_FAILURES=0
 	BOOT_PENDING="$(get boot_login)"
 	while true; do
 		if [ "$BOOT_PENDING" != 1 ] && [ "$(get auto_reconnect)" != 1 ]; then
@@ -194,7 +228,17 @@ daemon() {
 		# Do this before status() so DHCP-down periods do not incur two curl
 		# timeouts (connectivity probe plus portal login).
 		if ! wan_ready; then
-			save_state authenticating pending 'WAN is not ready; waiting for IPv4'
+			# An interface that never gets a lease is the one case a redial can
+			# actually fix, so let the configured recovery action run instead of
+			# waiting forever. With the default "retry" action nothing happens.
+			# The message names the interface so a mistyped wan_interface is
+			# diagnosable from the status page.
+			WAN_FAILURES=$((WAN_FAILURES + 1))
+			save_state authenticating pending "WAN '$wan' has no IPv4 address; waiting before authenticating"
+			if [ "$WAN_FAILURES" -ge "$MAX_FAILURES" ] && [ "$(get failure_action)" = restart_wan ]; then
+				renew_wan || true
+				WAN_FAILURES=0
+			fi
 			FAILURES=0
 			sleep "$RETRY"
 			continue
@@ -214,19 +258,33 @@ daemon() {
 					sleep "$RETRY"
 					continue
 				fi
-				[ "$FAILURES" -ge 99 ] || FAILURES=$((FAILURES + 1))
-				if [ "$FAILURES" -ge "$MAX_FAILURES" ]; then
-					case "$(get failure_action)" in
-						restart_wan) renew_wan || true;;
-						restart_service)
-							# Restart the managed process after cooling down; keep its PID.
-							sleep 60
-							exec "$0" daemon;;
-						retry) :;;
-					esac
-					# Keep the retry action at the capped delay. Recovery actions
-					# start a fresh backoff after they have been attempted.
-					[ "$(get failure_action)" = retry ] || FAILURES=0
+				# A new WAN lease makes the stored query string stale, so every
+				# retry with it fails identically. Recapture and retry once
+				# before this counts as a failure. That retry takes the same
+				# lock as the attempt above, so 75 still means "a manual
+				# operation is driving" and must not count as a failure.
+				refresh_query_login
+				RC=$?
+				if [ "$RC" -eq 0 ]; then
+					FAILURES=0
+				elif [ "$RC" -eq 75 ]; then
+					sleep "$RETRY"
+					continue
+				else
+					[ "$FAILURES" -ge 99 ] || FAILURES=$((FAILURES + 1))
+					if [ "$FAILURES" -ge "$MAX_FAILURES" ]; then
+						case "$(get failure_action)" in
+							restart_wan) renew_wan || true;;
+							restart_service)
+								# Restart the managed process after cooling down; keep its PID.
+								sleep 60
+								exec "$0" daemon;;
+							retry) :;;
+						esac
+						# Keep the retry action at the capped delay. Recovery actions
+						# start a fresh backoff after they have been attempted.
+						[ "$(get failure_action)" = retry ] || FAILURES=0
+					fi
 				fi
 			fi
 		fi

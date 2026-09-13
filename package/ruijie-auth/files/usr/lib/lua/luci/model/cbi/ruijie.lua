@@ -43,51 +43,47 @@ local function wan_gateway()
 	return ""
 end
 
+-- Everything the panel shows is gathered here, once, and handed to the template
+-- as plain values: the page must not fork a command per displayed field.
 local service_running = sys.call("/etc/init.d/ruijie-auth running >/dev/null 2>&1") == 0
 local auth_state = state("auth_state")
-local last_result = state("last_result")
-local last_time = state("last_time")
-local last_summary = state("last_summary")
 local dashboard = Template("ruijie/dashboard")
 dashboard.wan = wan
 dashboard.ip = wan_ipv4()
+dashboard.gateway = wan_gateway()
 dashboard.auth = auth_state
 dashboard.service = service_running
-dashboard.last_result = last_result
-dashboard.last_time = last_time
-dashboard.last_summary = last_summary
+dashboard.last_result = state("last_result")
+dashboard.last_time = state("last_time")
+dashboard.last_summary = state("last_summary")
+dashboard.reconnect = cursor:get("ruijie", "main", "auto_reconnect") == "1"
+dashboard.action_result = ({
+	success = translate("成功"),
+	failed = translate("失败"),
+	running = translate("正在执行"),
+})[action_result()]
+-- Section titles the page script keeps folded on load, "|" separated.
+dashboard.collapse = translate("认证参数")
 
 m = Map("ruijie", translate("Ruijie ePortal / 锐捷认证"),
 	translate("校园网认证中心。认证请求以短超时在后台运行，刷新页面即可查看执行结果。"))
 m:append(dashboard)
 
-status_section = m:section(SimpleSection, translate("当前状态"))
-local function display(name, label, value)
-	local field = status_section:option(DummyValue, name, label)
-	function field.cfgvalue()
-		local result = value()
-		return result ~= "" and result or "-"
-	end
+-- Buttons must live in a named section. A SimpleSection keeps no section name,
+-- and CBI parses its children through Node.parse with no section argument, so
+-- every Button lands in AbstractValue.parse with a nil section and the whole
+-- form POST dies on the resulting cbid() concatenation.
+local function action_group(title, description)
+	local section = m:section(NamedSection, "main", "main", translate(title))
+	if description then section.description = translate(description) end
+	return section
 end
 
-display("service", translate("服务状态"), function() return service_running and translate("Running") or translate("Stopped") end)
-display("auth", translate("当前认证状态"), function() return ({ online = translate("已联网"), authenticating = translate("正在认证"), failed = translate("认证失败") })[auth_state] or translate("未联网") end)
-display("wan", translate("WAN 接口"), function() return wan end)
-display("ipv4", translate("WAN IPv4 地址"), wan_ipv4)
-display("gateway", translate("默认网关"), wan_gateway)
-display("last_time", translate("最近认证时间"), function() return last_time end)
-display("last_result", translate("最近一次认证结果"), function() return last_result end)
-display("last_summary", translate("最近认证返回内容摘要"), function() return last_summary end)
-display("reconnect", translate("自动重连"), function() return cursor:get("ruijie", "main", "auto_reconnect") == "1" and translate("已启用") or translate("未启用") end)
-display("action_result", translate("最近快捷操作"), function()
-	local result = action_result()
-	return ({ success = translate("成功"), failed = translate("失败"), running = translate("正在执行") })[result] or "-"
-end)
-
-actions = m:section(SimpleSection, translate("认证操作"))
-actions.description = translate("操作会在后台执行，页面不会等待校园门户的完整响应。")
-local function action(name, title, command, style)
-	local button = actions:option(Button, name, title)
+local function action(section, name, title, command, style)
+	-- The button carries its own label, so the option gets an empty title:
+	-- otherwise CBI prints the same text again as a <label> above it.
+	local button = section:option(Button, name, "")
+	button.inputtitle = translate(title)
 	button.inputstyle = style or "apply"
 	function button.write()
 		sys.call("(umask 077; flock -n 8 || exit 75; printf 'result=running\\n' >/tmp/ruijie-auth.action; " .. command .. " >>/tmp/ruijie-auth.action 2>&1; rc=$?; [ $rc -eq 0 ] && printf 'result=success\\n' >>/tmp/ruijie-auth.action || printf 'result=failed\\n' >>/tmp/ruijie-auth.action; logger -t ruijie-auth 'LuCI action completed') 8>/tmp/ruijie-auth.action.lock </dev/null >/dev/null 2>&1 &")
@@ -95,12 +91,40 @@ local function action(name, title, command, style)
 	end
 end
 
-action("login", translate("立即登录"), "/usr/libexec/ruijie-auth login")
-action("logout", translate("注销认证"), "/usr/libexec/ruijie-auth logout", "reset")
-action("reauth", translate("重新认证"), "/usr/libexec/ruijie-auth reauth")
-action("restart", translate("重启认证服务"), "/etc/init.d/ruijie-auth restart")
-action("renew", translate("重新获取 WAN DHCP"), "/usr/libexec/ruijie-auth renew-wan")
-action("clear", translate("清除最近认证结果"), "/usr/libexec/ruijie-auth clear", "reset")
+-- One section per group. CBI stacks every option of a section in a single
+-- column, so ten buttons in one section is a ten-row list; splitting them puts
+-- the buttons that belong to the same job on the same row.
+local session = action_group("认证操作",
+	"操作会在后台执行，页面不会等待校园门户的完整响应。")
+action(session, "login", "立即登录", "/usr/libexec/ruijie-auth login")
+action(session, "logout", "注销认证", "/usr/libexec/ruijie-auth logout", "reset")
+action(session, "reauth", "重新认证", "/usr/libexec/ruijie-auth reauth")
+
+local network = action_group("服务与网络",
+	"门户换了地址、或者本地状态已经过期时，按 WAN 地址、queryString、认证服务的顺序重来一遍。")
+action(network, "renew", "重新获取 WAN DHCP", "/usr/libexec/ruijie-auth renew-wan")
+action(network, "refresh", "重新抓取 queryString", "/usr/libexec/ruijie-refresh-query capture")
+action(network, "restart", "重启认证服务", "/etc/init.d/ruijie-auth restart")
+action(network, "clear", "清除最近认证结果", "/usr/libexec/ruijie-auth clear", "reset")
+
+-- Passwords do change out from under a router (campus-wide resets), and the
+-- old one is worthless the moment it stops being accepted. Keep the value
+-- being replaced in password_prev so the change is always one click back.
+local value_write = Value.write or AbstractValue.write
+local function remember_password(self, section, value)
+	local previous = trim(self.map:get(section, self.option))
+	-- Re-saving an unchanged value must not overwrite the rollback point.
+	if trim(value) ~= "" and previous ~= "" and trim(value) ~= previous then
+		self.map:set(section, "password_prev", previous)
+	end
+	value_write(self, section, value)
+end
+
+local passwords = action_group("密码管理",
+	"保存新密码时旧值会自动存进回退点，这里可以验证当前密码、换回旧密码或丢弃回退点。")
+action(passwords, "pw_check", "验证当前密码", "/usr/libexec/ruijie-password check")
+action(passwords, "pw_revert", "回退到上一个密码", "/usr/libexec/ruijie-password revert", "reset")
+action(passwords, "pw_drop", "丢弃密码回退点", "/usr/libexec/ruijie-password drop", "reset")
 
 recovery = m:section(NamedSection, "main", "main", translate("自动恢复"))
 o = recovery:option(Flag, "enabled", translate("启用锐捷认证服务")); o.default = 0
@@ -115,6 +139,8 @@ o:value("retry", translate("仅继续重试")); o:value("restart_wan", translate
 o = recovery:option(Value, "wan_interface", translate("WAN 逻辑接口")); o.default = "wan"
 o.description = translate("用于 ubus 状态和按需 DHCP 重拨；填写逻辑接口名，例如 wan。")
 o = recovery:option(Flag, "renew_dhcp_on_reauth", translate("重新认证时更新 WAN DHCP")); o.default = 0
+o = recovery:option(Flag, "auto_refresh_query", translate("登录失败时重新抓取 queryString")); o.default = 1
+o.description = translate("queryString 与 WAN 当时的 IP、MAC 绑定。换了地址后旧串永远登录不上，开启后守护进程会从校园门户的跳转里重抓一份再试一次，而不是无限重试同一个废串。")
 
 auth = m:section(NamedSection, "main", "main", translate("认证参数"))
 o = auth:option(Value, "server", translate("Server")); o.placeholder = "http://172.31.0.3"
@@ -122,7 +148,18 @@ o = auth:option(Value, "login_path", translate("Login path")); o.default = "/epo
 o = auth:option(Value, "logout_path", translate("Logout path")); o.default = "/eportal/InterFace.do?method=logout"
 o = auth:option(Value, "username", translate("userId / account"))
 o = auth:option(Value, "password_payload", translate("Password payload")); o.password = true
-o.description = translate("请填入门户实际请求中的 password 字段值；部分门户不接受明文密码。")
+o.write = remember_password
+o.description = translate("请填入门户实际请求中的 password 字段值；部分门户不接受明文密码。保存新值时，被替换的旧值会自动存进回退点。")
+
+local rollback = auth:option(DummyValue, "password_rollback", translate("密码回退点"))
+function rollback.cfgvalue()
+	local previous = trim(cursor:get("ruijie", "main", "password_prev") or "")
+	if previous == "" then
+		return translate("无。保存新密码时会自动把旧密码存进来。")
+	end
+	return translate("已保存") .. "：" .. string.format(translate("%d 位，末两位 %s"), #previous, previous:sub(-2))
+		.. translate("。上面两个按钮可以换回或丢弃。")
+end
 o = auth:option(Value, "service", translate("Service"))
 o = auth:option(Value, "query_string", translate("queryString"))
 o = auth:option(Value, "cookie", translate("Cookie")); o.password = true
@@ -136,11 +173,10 @@ o = auth:option(Value, "check_url", translate("联网检测 URL")); o.default = 
 o = auth:option(Value, "interface", translate("校园网物理 WAN 设备"))
 o.description = translate("可选，例如 eth0.2。认证请求绑定校园出口，避免 USB 备用网络掩盖校园认证掉线。")
 
-logs = m:section(SimpleSection, translate("最近认证日志"))
-recent_log = logs:option(DummyValue, "recent_log", translate("最近 80 行"))
-function recent_log.cfgvalue()
-	local output = trim(sys.exec("logread -e ruijie-auth 2>/dev/null | tail -n 80"))
-	return output ~= "" and output or "-"
-end
+-- A Template node, not a SimpleSection: the log is one preformatted block and
+-- needs no form field of its own.
+logs = Template("ruijie/logs")
+logs.lines = trim(sys.exec("logread -e ruijie-auth 2>/dev/null | tail -n 80"))
+m:append(logs)
 
 return m

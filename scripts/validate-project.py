@@ -11,6 +11,9 @@ for directory in ('scripts', 'files', 'package'):
             continue
         if path.suffix == '.lua':
             subprocess.run(['luac', '-p', str(path)], check=True)
+        elif path.suffix == '.htm':
+            subprocess.run([sys.executable, 'scripts/verify-template.py', str(path)],
+                           cwd=root, check=True)
         elif path.read_bytes().startswith(b'#!/bin/sh'):
             subprocess.run(['sh', '-n', str(path)], check=True)
 subprocess.run([sys.executable, '-m', 'unittest', 'discover', '-s', 'tests', '-v'], cwd=root, check=True)
