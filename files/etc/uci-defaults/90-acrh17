@@ -93,6 +93,21 @@ uci -q set smartdns.aliyun_secondary.type='udp'
 uci -q set smartdns.aliyun_secondary.ip='223.6.6.6'
 uci -q set smartdns.aliyun_secondary.port='53'
 uci -q set ua3f.enabled.enabled='1'
+# L3 rewrite. The TTL and the timestamp option are both rewritten on the SYN
+# only -- the nft rule queues just "tcp flags syn" -- so the per-packet cost
+# stays off the data path. Pinning the TTL to 64 makes forwarded traffic look
+# like it came from a Linux host one hop away; without it the router's own
+# decrement leaves a client's fingerprint showing through (a Windows client
+# arrives as 127). Verified on the wire with a distinctive value: a forwarded
+# SYN left the WAN with the rewritten TTL and no timestamp option.
+#
+# The rest stay off on purpose. ipid is a no-op on modern Linux and still costs
+# a queue trip per packet. tcpwin advertises 65535, which is itself a fingerprint.
+# block_quic buys nothing here and breaks HTTP/3. bpf_offload needs
+# kmod-sched-bpf, which this image does not carry.
+uci -q set ua3f.main.l3_rewrite_ttl='1'
+uci -q set ua3f.main.l3_rewrite_ttl_value='64'
+uci -q set ua3f.main.l3_rewrite_tcpts='1'
 uci -q commit network
 uci -q commit system
 uci -q commit luci
