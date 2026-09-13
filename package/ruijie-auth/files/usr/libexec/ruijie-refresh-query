@@ -1,0 +1,132 @@
+#!/bin/sh
+# Refresh ruijie.main.query_string from the campus portal's own redirect.
+#
+# The ePortal encrypts wlanuserip and mac per client, so a query string is
+# bound to the WAN address and MAC that received it. It cannot be copied from
+# another machine and it dies on any link change, so it has to be recaptured
+# on the router itself. Run this while the campus link is being redirected to
+# the portal, i.e. while the WAN has an IPv4 lease but is not authenticated.
+#
+#   ruijie-refresh-query            capture, then reauthenticate
+#   ruijie-refresh-query capture    capture only
+# The captured string ends up in the state file and in UCI; keep both root-only,
+# matching ruijie-auth.
+umask 077
+CFG="ruijie.main"
+STATE="/tmp/ruijie-auth.state"
+get() { uci -q get "$CFG.$1"; }
+
+# Reads one parameter out of an ePortal query string (key=value&key=value...).
+field() { printf '%s' "$1" | tr '&' '\n' | sed -n "s/^$2=//p" | head -1; }
+
+save_state() {
+	tmp="${STATE}.tmp.$$"
+	{
+		printf 'auth_state=%s\n' "$1"
+		printf 'last_result=%s\n' "$2"
+		printf 'last_time=%s\n' "$(date '+%Y-%m-%d %H:%M:%S')"
+		printf 'last_summary=%s\n' "$(printf '%s' "$3" | tr '\n' ' ' | cut -c1-240)"
+	} > "$tmp" && mv -f "$tmp" "$STATE"
+}
+
+wan_ready() {
+	wan="$(get wan_interface)"
+	case "$wan" in ''|*[!A-Za-z0-9_-]*) wan=wan;; esac
+	status_json="$(ubus call "network.interface.$wan" status 2>/dev/null)" || return 1
+	up="$(printf '%s' "$status_json" | jsonfilter -e '@.up' 2>/dev/null)"
+	case "$up" in 1|true) ;; *) return 1;; esac
+	ipv4="$(printf '%s' "$status_json" | jsonfilter -e '@["ipv4-address"][0].address' 2>/dev/null)"
+	case "$ipv4" in ''|0.0.0.0) return 1;; esac
+	l3dev="$(printf '%s' "$status_json" | jsonfilter -e '@.l3_device' 2>/dev/null)"
+	return 0
+}
+
+# The campus intercepts port 80 and answers with a 302 to the portal. Plain
+# IP literals are used so a broken resolver cannot hide the redirect, and -L
+# is deliberately absent: the 302 itself is the answer we are after.
+#
+# The probe has to leave through the same device the login will use. The portal
+# binds the returned query string to the address that received the redirect, so
+# on a router that can fail over to a second WAN a default-route probe would
+# capture a string for the wrong link and overwrite a working one.
+probe() {
+	set -- "$1"
+	[ -z "$DEV" ] || set -- --interface "$DEV" "$@"
+	curl -q -4 -sS --noproxy '*' --proto '=http' --connect-timeout 5 --max-time 12 \
+		-o /dev/null -D - "$@" 2>/dev/null
+}
+
+# Called as a plain command, never via $(...): the device and address it finds
+# live in globals that a command substitution's subshell would discard.
+wan_ready || {
+	save_state authenticating pending 'WAN is not ready; waiting for IPv4 before refreshing the query string'
+	echo 'ERROR: WAN is not up or has no IPv4 address'
+	exit 1
+}
+WAN_IP="$ipv4"
+
+# Same device selection as ruijie-auth's request(): the explicit override wins,
+# otherwise the l3_device of the configured logical WAN.
+DEV="$(get interface)"
+[ -n "$DEV" ] || DEV="$l3dev"
+case "$DEV" in ''|*[!A-Za-z0-9_.:-]*) DEV='';; esac
+
+LOCATION=''
+for url in http://1.1.1.1/ http://connect.rom.miui.com/generate_204 http://223.5.5.5/; do
+	LOCATION="$(probe "$url" | tr -d '\r' | sed -n 's/^[Ll]ocation: *//p')"
+	[ -n "$LOCATION" ] && break
+done
+
+if [ -z "$LOCATION" ]; then
+	save_state authenticating pending 'No portal redirect: already online, or the portal is unreachable'
+	echo "ERROR: no portal redirect seen. WAN $WAN_IP is either already authenticated"
+	echo '       (nothing to refresh) or the campus portal did not answer.'
+	exit 1
+fi
+
+case "$LOCATION" in
+	*index.jsp\?*) QUERY="${LOCATION#*index.jsp?}" ;;
+	*)
+		save_state authenticating pending "Redirect is not a portal login page: $LOCATION"
+		echo "ERROR: redirect is not a portal login page: $LOCATION"
+		exit 1 ;;
+esac
+
+# Refuse to store a truncated or unrelated string. A real query string always
+# carries the client address and MAC, both encrypted, so both must be present
+# and non-empty. A case pattern cannot express that: "?" is a glob wildcard and
+# "|" is an alternation, so "*wlanuserip=?*|*mac=?*" accepts either one alone.
+if [ -z "$(field "$QUERY" wlanuserip)" ] || [ -z "$(field "$QUERY" mac)" ]; then
+	save_state authenticating pending "Captured query string is missing wlanuserip or mac: $QUERY"
+	echo "ERROR: captured query string is missing wlanuserip or mac: $QUERY"
+	exit 1
+fi
+
+OLD="$(get query_string)"
+uci set "$CFG.query_string=$QUERY"
+uci commit ruijie
+logger -t ruijie-auth "query-string refreshed for $WAN_IP"
+
+echo "WAN      : $WAN_IP"
+echo "旧 query : $OLD"
+echo "新 query : $QUERY"
+echo
+
+if [ "$1" = capture ]; then
+	save_state authenticating pending 'query string captured; login not attempted'
+	echo 'Captured only. Run ruijie-refresh-query without arguments to log in.'
+	exit 0
+fi
+
+save_state authenticating pending 'query string refreshed; authenticating'
+/usr/libexec/ruijie-auth reauth && exit 0
+
+# A capture that does not authenticate is worse than the value it replaced, so
+# put the previous string back and let the normal retry path run.
+if [ -n "$OLD" ]; then
+	uci set "$CFG.query_string=$OLD"
+	uci commit ruijie
+	logger -t ruijie-auth "reauth failed; restored the previous query string for $WAN_IP"
+	echo 'reauth failed; restored the previous query string'
+fi
+exit 1

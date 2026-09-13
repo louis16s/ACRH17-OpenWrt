@@ -21,8 +21,22 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       matrix: ${{ steps.refs.outputs.matrix }}
+      version: ${{ steps.stamp.outputs.version }}
     steps:
       - uses: actions/checkout@v7
+      - id: stamp
+        name: Stamp the run start time into the firmware version
+        run: |
+          python3 - <<'PYTHON'
+          import datetime, os
+          # One stamp for the whole run, so the four variants of a release stay
+          # recognisable as a set. UTC+8 is the timezone the image is read in.
+          zone = datetime.timezone(datetime.timedelta(hours=8))
+          started = datetime.datetime.now(zone).strftime('%Y%m%d-%H%M')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('version=' + started + '\n')
+          print('Firmware version stamp:', started)
+          PYTHON
       - id: refs
         name: Resolve immutable variant commits
         run: |
@@ -57,6 +71,8 @@ jobs:
       VARIANT_ID: ${{ matrix.id }}
       VARIANT_REF: ${{ matrix.ref }}
       VARIANT_LABEL: ${{ matrix.label }}
+      VERSION_STAMP: ${{ needs.resolve.outputs.version }}
+      VARIANT_SHA: ${{ matrix.sha }}
     defaults:
       run:
         shell: bash
@@ -164,12 +180,26 @@ jobs:
         working-directory: project/openwrt
         run: |
           set -o pipefail
+          # include/version.mk reads $(CONFIG_VERSION_NUMBER) and only falls back
+          # to the upstream "24.10-SNAPSHOT" when it is empty. These are plain
+          # make variables, not kconfig symbols, so make defconfig would prune
+          # them from .config. Passing them on the command line puts them above
+          # every makefile assignment, and make forwards command line variables
+          # to each sub-make, so the stamp reaches /etc/openwrt_release.
+          version_args=(
+            "CONFIG_VERSION_NUMBER=$(python3 ../scripts/firmware-version.py include/version.mk "$VERSION_STAMP")"
+            "CONFIG_VERSION_CODE=${VARIANT_SHA:0:7}"
+          )
+          {
+            printf 'version=%s\n' "${version_args[0]#CONFIG_VERSION_NUMBER=}"
+            printf 'revision=%s\n' "${version_args[1]#CONFIG_VERSION_CODE=}"
+          } > ../artifacts/version.txt
           set +e
-          make -j"$(nproc)" V=s 2>&1 | tee ../logs/build.log
+          make -j"$(nproc)" V=s "${version_args[@]}" 2>&1 | tee ../logs/build.log
           result=${PIPESTATUS[0]}
           set -e
           if [ "$result" -ne 0 ]; then
-            make -j1 V=s 2>&1 | tee ../logs/build-serial.log
+            make -j1 V=s "${version_args[@]}" 2>&1 | tee ../logs/build-serial.log
           fi
 
       - name: Verify firmware and core packages
@@ -247,10 +277,15 @@ jobs:
           }
           (cd release-assets && sha256sum -- *.bin > sha256sums)
           assets+=(release-assets/sha256sums)
+          # Every variant of a run shares one version stamp; the first file is
+          # enough to name it, and each image still carries its own revision.
+          stamp="$(sed -n 's/^version=//p' "$(find release-input -name version.txt -print -quit)")"
           tag="build-${GITHUB_RUN_ID}"
           title="RT-ACRH17 firmware build ${GITHUB_RUN_ID}"
           cat > release-notes.md <<EOF
           Automated OpenWrt 24.10 / ImmortalWrt 24.10 RT-ACRH17 matrix build.
+
+          Firmware version: ${stamp:-unknown}
 
           Only sysupgrade .bin images are attached; use the matching initramfs artifact for first RAM-boot testing when supported by the installed OpBoot version. No ART, EEPROM, Factory, calibration, or bootloader data is included or modified.
           EOF

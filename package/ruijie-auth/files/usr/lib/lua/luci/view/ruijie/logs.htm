@@ -1,0 +1,11 @@
+<%
+-- Rendered as a Template node rather than a CBI DummyValue so the output can be
+-- a real <pre> block.  dashboard.css is loaded by dashboard.htm, which the CBI
+-- model always appends ahead of this one.
+local pcdata = require "luci.xml".pcdata
+local lines = self.lines or ""
+%>
+<details class="ruijie-logs">
+	<summary>最近认证日志</summary>
+	<pre><%=pcdata(lines ~= "" and lines or "暂无日志")%></pre>
+</details>
