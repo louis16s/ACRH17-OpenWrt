@@ -2,10 +2,10 @@
  *
  * CBI renders every section as a plain <div class="cbi-section"> and gives
  * several of them the same id, so nothing here may key on an id or on a fixed
- * child position.  The section holding the action buttons is found by the shape
- * of its content, and the sections that start collapsed are named by the CBI
- * model through data-ruijie-collapse, which keeps that list next to the
- * definitions it refers to instead of duplicating the titles in here.
+ * child position.  The button toolbars are laid out entirely by the stylesheet;
+ * the sections that start folded are named by the CBI model through
+ * data-ruijie-collapse, which keeps that list next to the definitions it refers
+ * to instead of duplicating the titles in here.
  */
 (function () {
 	'use strict';
@@ -48,19 +48,12 @@
 		var map = document.getElementById('cbi-ruijie');
 		if (!map) return;
 
-		// Buttons live one per row so CBI can label them; the grid in the
-		// stylesheet turns the row set into a toolbar.
-		var sections = map.querySelectorAll('.cbi-section');
-		for (var i = 0; i < sections.length; i++) {
-			var section = sections[i];
-			if (section.querySelector('.cbi-value > .btn')) section.classList.add('ruijie-actions');
-		}
-
 		var names = collapseTargets(map);
 		if (!names.length) return;
-		for (var j = 0; j < sections.length; j++) {
-			var heading = sections[j].querySelector('h3');
-			if (heading && names.indexOf(heading.textContent.trim()) !== -1) makeCollapsible(sections[j]);
+		var sections = map.querySelectorAll('.cbi-section');
+		for (var i = 0; i < sections.length; i++) {
+			var heading = sections[i].querySelector('h3');
+			if (heading && names.indexOf(heading.textContent.trim()) !== -1) makeCollapsible(sections[i]);
 		}
 	}
 

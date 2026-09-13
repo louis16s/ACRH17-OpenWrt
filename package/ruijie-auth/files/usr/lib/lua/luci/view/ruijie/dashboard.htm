@@ -5,6 +5,10 @@
 -- ("|" separated), so that list stays beside the model defining those sections.
 -- LuCI templates have no comment tag: "<%--" parses as the whitespace-stripping
 -- "<%-" followed by a stray "-", so notes belong inside a Lua block like this.
+--
+-- The panel head is a <div>, not a <header>. The argon theme styles the bare
+-- <header> element globally and hangs a header::after band off it, which lands
+-- on top of the heading as a stray bar.
 local pcdata = require "luci.xml".pcdata
 
 local auth = self.auth or ""
@@ -36,13 +40,13 @@ local cards = {
 %>
 <link rel="stylesheet" href="<%=resource%>/ruijie/dashboard.css">
 <div class="ruijie-dashboard" data-ruijie-collapse="<%=self.collapse or ""%>">
-	<header class="ruijie-hero">
+	<div class="ruijie-hero">
 		<div>
 			<h3>校园网连接状态</h3>
 			<p>实时汇总 WAN、认证服务与最近一次门户响应。</p>
 		</div>
 		<span class="ruijie-pill <%=state.cls%>"><i></i><%=state.label%></span>
-	</header>
+	</div>
 	<div class="ruijie-cards">
 <%
 for _, card in ipairs(cards) do

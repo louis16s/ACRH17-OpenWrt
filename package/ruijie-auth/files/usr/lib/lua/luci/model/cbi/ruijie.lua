@@ -73,13 +73,17 @@ m:append(dashboard)
 -- and CBI parses its children through Node.parse with no section argument, so
 -- every Button lands in AbstractValue.parse with a nil section and the whole
 -- form POST dies on the resulting cbid() concatenation.
-actions = m:section(NamedSection, "main", "main", translate("认证操作"))
-actions.description = translate("操作会在后台执行，页面不会等待校园门户的完整响应。")
-local function action(name, title, command, style)
+local function action_group(title, description)
+	local section = m:section(NamedSection, "main", "main", translate(title))
+	if description then section.description = translate(description) end
+	return section
+end
+
+local function action(section, name, title, command, style)
 	-- The button carries its own label, so the option gets an empty title:
 	-- otherwise CBI prints the same text again as a <label> above it.
-	local button = actions:option(Button, name, "")
-	button.inputtitle = title
+	local button = section:option(Button, name, "")
+	button.inputtitle = translate(title)
 	button.inputstyle = style or "apply"
 	function button.write()
 		sys.call("(umask 077; flock -n 8 || exit 75; printf 'result=running\\n' >/tmp/ruijie-auth.action; " .. command .. " >>/tmp/ruijie-auth.action 2>&1; rc=$?; [ $rc -eq 0 ] && printf 'result=success\\n' >>/tmp/ruijie-auth.action || printf 'result=failed\\n' >>/tmp/ruijie-auth.action; logger -t ruijie-auth 'LuCI action completed') 8>/tmp/ruijie-auth.action.lock </dev/null >/dev/null 2>&1 &")
@@ -87,13 +91,21 @@ local function action(name, title, command, style)
 	end
 end
 
-action("login", translate("立即登录"), "/usr/libexec/ruijie-auth login")
-action("logout", translate("注销认证"), "/usr/libexec/ruijie-auth logout", "reset")
-action("reauth", translate("重新认证"), "/usr/libexec/ruijie-auth reauth")
-action("restart", translate("重启认证服务"), "/etc/init.d/ruijie-auth restart")
-action("renew", translate("重新获取 WAN DHCP"), "/usr/libexec/ruijie-auth renew-wan")
-action("refresh", translate("重新抓取 queryString"), "/usr/libexec/ruijie-refresh-query capture")
-action("clear", translate("清除最近认证结果"), "/usr/libexec/ruijie-auth clear", "reset")
+-- One section per group. CBI stacks every option of a section in a single
+-- column, so ten buttons in one section is a ten-row list; splitting them puts
+-- the buttons that belong to the same job on the same row.
+local session = action_group("认证操作",
+	"操作会在后台执行，页面不会等待校园门户的完整响应。")
+action(session, "login", "立即登录", "/usr/libexec/ruijie-auth login")
+action(session, "logout", "注销认证", "/usr/libexec/ruijie-auth logout", "reset")
+action(session, "reauth", "重新认证", "/usr/libexec/ruijie-auth reauth")
+
+local network = action_group("服务与网络",
+	"门户换了地址、或者本地状态已经过期时，按 WAN 地址、queryString、认证服务的顺序重来一遍。")
+action(network, "renew", "重新获取 WAN DHCP", "/usr/libexec/ruijie-auth renew-wan")
+action(network, "refresh", "重新抓取 queryString", "/usr/libexec/ruijie-refresh-query capture")
+action(network, "restart", "重启认证服务", "/etc/init.d/ruijie-auth restart")
+action(network, "clear", "清除最近认证结果", "/usr/libexec/ruijie-auth clear", "reset")
 
 -- Passwords do change out from under a router (campus-wide resets), and the
 -- old one is worthless the moment it stops being accepted. Keep the value
@@ -108,9 +120,11 @@ local function remember_password(self, section, value)
 	value_write(self, section, value)
 end
 
-action("pw_check", translate("验证当前密码"), "/usr/libexec/ruijie-password check")
-action("pw_revert", translate("回退到上一个密码"), "/usr/libexec/ruijie-password revert", "reset")
-action("pw_drop", translate("丢弃密码回退点"), "/usr/libexec/ruijie-password drop", "reset")
+local passwords = action_group("密码管理",
+	"保存新密码时旧值会自动存进回退点，这里可以验证当前密码、换回旧密码或丢弃回退点。")
+action(passwords, "pw_check", "验证当前密码", "/usr/libexec/ruijie-password check")
+action(passwords, "pw_revert", "回退到上一个密码", "/usr/libexec/ruijie-password revert", "reset")
+action(passwords, "pw_drop", "丢弃密码回退点", "/usr/libexec/ruijie-password drop", "reset")
 
 recovery = m:section(NamedSection, "main", "main", translate("自动恢复"))
 o = recovery:option(Flag, "enabled", translate("启用锐捷认证服务")); o.default = 0
