@@ -5,6 +5,29 @@ local function trim(value)
 	return (value or ""):gsub("^%s+", ""):gsub("%s+$", "")
 end
 
+-- Lua 5.1 has no UTF-8 library and # counts bytes. Passwords from this portal
+-- are ASCII, but the panel is Chinese and a password may not be, and taking the
+-- last two bytes of "密码" returns half a character -- an invalid sequence the
+-- browser draws as a replacement box, which tells the user nothing about which
+-- password is stored. Count characters, and take whole ones.
+local function utf8_length(value)
+	local count = 0
+	for _ in value:gmatch("[^\128-\191]") do count = count + 1 end
+	return count
+end
+
+local function utf8_tail(value, wanted)
+	local start = #value
+	local found = 0
+	while start > 0 and found < wanted do
+		local byte = value:byte(start)
+		start = start - 1
+		-- Anything that is not a continuation byte begins a character.
+		if byte < 128 or byte >= 192 then found = found + 1 end
+	end
+	return value:sub(start + 1)
+end
+
 -- Read one snapshot per page instead of forking sed/head/uci for each field.
 local fs = require "nixio.fs"
 local cursor = require("luci.model.uci").cursor()
@@ -57,8 +80,16 @@ dashboard.last_result = state("last_result")
 dashboard.last_time = state("last_time")
 dashboard.last_summary = state("last_summary")
 dashboard.reconnect = cursor:get("ruijie", "main", "auto_reconnect") == "1"
+-- Four outcomes, not two. "The password was written but nothing proved it" and
+-- "another action held the lock, so this one never ran" both used to be shown as
+-- 失败, which reads as "the login failed" -- and sends the user to retry a
+-- password that may be perfectly good. A single outcome for both also hid the
+-- case where the action did not run at all and the panel showed the previous
+-- run's success.
 dashboard.action_result = ({
 	success = translate("成功"),
+	unverified = translate("已写入，但未能验证"),
+	busy = translate("另一个操作正在运行，本次未执行"),
 	failed = translate("失败"),
 	running = translate("正在执行"),
 })[action_result()]
@@ -86,7 +117,25 @@ local function action(section, name, title, command, style)
 	button.inputtitle = translate(title)
 	button.inputstyle = style or "apply"
 	function button.write()
-		sys.call("(umask 077; flock -n 8 || exit 75; printf 'result=running\\n' >/tmp/ruijie-auth.action; " .. command .. " >>/tmp/ruijie-auth.action 2>&1; rc=$?; [ $rc -eq 0 ] && printf 'result=success\\n' >>/tmp/ruijie-auth.action || printf 'result=failed\\n' >>/tmp/ruijie-auth.action; logger -t ruijie-auth 'LuCI action completed') 8>/tmp/ruijie-auth.action.lock </dev/null >/dev/null 2>&1 &")
+		-- The action file is the only thing the panel reads, so every outcome has
+		-- to be written to it -- including "this never ran". The lock test used
+		-- to come first and leave without touching the file, which left the
+		-- previous run's answer on screen: the panel reported 成功 for an action
+		-- that was dropped before it started. Exit codes are mapped apart rather
+		-- than collapsed, so a lock collision and an unverified write stop
+		-- looking like a failed login.
+		local shell = "(umask 077; "
+			.. "flock -n 8 || { printf 'result=busy\\n' >/tmp/ruijie-auth.action; exit 75; }; "
+			.. "printf 'result=running\\n' >/tmp/ruijie-auth.action; "
+			.. command .. " >>/tmp/ruijie-auth.action 2>&1; rc=$?; "
+			.. "case $rc in "
+			.. "0) printf 'result=success\\n' >>/tmp/ruijie-auth.action;; "
+			.. "2) printf 'result=unverified\\n' >>/tmp/ruijie-auth.action;; "
+			.. "75) printf 'result=busy\\n' >>/tmp/ruijie-auth.action;; "
+			.. "*) printf 'result=failed\\n' >>/tmp/ruijie-auth.action;; esac; "
+			.. "logger -t ruijie-auth 'LuCI action completed') "
+			.. "8>/tmp/ruijie-auth.action.lock </dev/null >/dev/null 2>&1 &"
+		sys.call(shell)
 		m.message = translate("操作已提交。认证请求在后台以短超时执行；刷新页面可查看明确结果。")
 	end
 end
@@ -112,18 +161,36 @@ action(network, "clear", "清除最近认证结果", "/usr/libexec/ruijie-auth c
 -- being replaced in password_prev so the change is always one click back.
 local value_write = Value.write or AbstractValue.write
 local function remember_password(self, section, value)
-	local previous = trim(self.map:get(section, self.option))
-	-- Re-saving an unchanged value must not overwrite the rollback point.
-	if trim(value) ~= "" and previous ~= "" and trim(value) ~= previous then
+	local current = self.map:get(section, self.option)
+	local previous = trim(current)
+	-- Re-saving an unchanged value must not overwrite the rollback point. The
+	-- comparison is on the raw values -- the same ones CBI compared to decide
+	-- whether to call this at all. Trimming here would let a value that differs
+	-- only in surrounding whitespace be saved without recording what it
+	-- replaced, and the value it replaced is then the only password still known
+	-- to work. The command line compares raw values too, so this is also what
+	-- keeps the two paths from disagreeing.
+	if trim(value) ~= "" and previous ~= "" and value ~= current then
+		-- password_prev moves with every save, so saving the page twice pushes
+		-- the value the router shipped with out of reach. Anchor it once in
+		-- password_original and never move it again. The test is whether the
+		-- option has ever been written, not whether its value is non-empty: the
+		-- shipped payload is empty, so an emptiness test anchors one save too
+		-- late -- onto a value that had itself just been replaced, and in the
+		-- worst case onto one the portal had already turned down.
+		if self.map:get(section, "password_original") == nil then
+			self.map:set(section, "password_original", previous)
+		end
 		self.map:set(section, "password_prev", previous)
 	end
 	value_write(self, section, value)
 end
 
 local passwords = action_group("密码管理",
-	"保存新密码时旧值会自动存进回退点，这里可以验证当前密码、换回旧密码或丢弃回退点。")
+	"保存新密码时旧值会自动存进回退点，这里可以验证当前密码、换回上一个或最初密码、丢弃回退点。")
 action(passwords, "pw_check", "验证当前密码", "/usr/libexec/ruijie-password check")
 action(passwords, "pw_revert", "回退到上一个密码", "/usr/libexec/ruijie-password revert", "reset")
+action(passwords, "pw_original", "回退到最初密码", "/usr/libexec/ruijie-password revert --original", "reset")
 action(passwords, "pw_drop", "丢弃密码回退点", "/usr/libexec/ruijie-password drop", "reset")
 
 recovery = m:section(NamedSection, "main", "main", translate("自动恢复"))
@@ -149,16 +216,27 @@ o = auth:option(Value, "logout_path", translate("Logout path")); o.default = "/e
 o = auth:option(Value, "username", translate("userId / account"))
 o = auth:option(Value, "password_payload", translate("Password payload")); o.password = true
 o.write = remember_password
-o.description = translate("请填入门户实际请求中的 password 字段值；部分门户不接受明文密码。保存新值时，被替换的旧值会自动存进回退点。")
+o.description = translate("请填入门户实际请求中的 password 字段值；部分门户不接受明文密码。保存新值时，被替换的旧值会自动存进回退点，最初那个值单独留一份，反复保存也不会被挤掉。网页保存不做在线验证，要确认新密码能不能登录请用下面的「验证当前密码」。")
 
 local rollback = auth:option(DummyValue, "password_rollback", translate("密码回退点"))
 function rollback.cfgvalue()
-	local previous = trim(cursor:get("ruijie", "main", "password_prev") or "")
-	if previous == "" then
-		return translate("无。保存新密码时会自动把旧密码存进来。")
+	local function describe(value)
+		return string.format(translate("%d 位，末两位 %s"), utf8_length(value), utf8_tail(value, 2))
 	end
-	return translate("已保存") .. "：" .. string.format(translate("%d 位，末两位 %s"), #previous, previous:sub(-2))
-		.. translate("。上面两个按钮可以换回或丢弃。")
+	local previous = trim(cursor:get("ruijie", "main", "password_prev") or "")
+	local original = trim(cursor:get("ruijie", "main", "password_original") or "")
+	local text
+	if previous == "" then
+		text = translate("无。保存新密码时会自动把旧密码存进来。")
+	else
+		text = translate("已保存") .. "：" .. describe(previous)
+			.. translate("。上面的按钮可以换回或丢弃。")
+	end
+	if original ~= "" then
+		text = text .. " " .. translate("最初密码") .. "：" .. describe(original)
+			.. translate("，多位保存过也不会丢。")
+	end
+	return text
 end
 o = auth:option(Value, "service", translate("Service"))
 o = auth:option(Value, "query_string", translate("queryString"))
