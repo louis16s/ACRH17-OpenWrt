@@ -5,16 +5,37 @@
  * #cbi-ruijie so it cannot leak into the rest of LuCI, and to classes rather
  * than ids because the Lua CBI model renders several sections on the same
  * config/section pair and they all end up with id="cbi-ruijie-main".
+ *
+ * Two palettes live here on purpose.
+ *
+ * The connection panel is dark in both themes.  It is the one element meant to
+ * stand out, so its colours are fixed rather than inherited.
+ *
+ * Everything else follows the theme, and that is what the first version got
+ * wrong: it painted the CBI sections with a fixed translucent navy, which on
+ * the default light theme lands as grey mud on white.  argon redefines
+ * --bg-light/--bg-gray with !important in dark.css, so reading the surface from
+ * --bg-light picks up #fff or #1e1e1e on its own.  The greys below are
+ * mid-tone, so the same border and tint read correctly on either background,
+ * and no text colour is forced -- the page inherits whatever the theme set.
  */
 
 #cbi-ruijie {
-	--rj-bg: #111b2d;
-	--rj-panel: rgba(23, 37, 61, .88);
-	--rj-border: rgba(148, 163, 184, .2);
-	--rj-border-strong: rgba(148, 163, 184, .34);
-	--rj-muted: #9fb0c8;
-	--rj-text: #f3f7ff;
-	--rj-accent: #62a7ff;
+	/* Connection panel: fixed, because it is dark by design. */
+	--rj-hero-bg: #111b2d;
+	--rj-hero-panel: rgba(23, 37, 61, .88);
+	--rj-hero-text: #f3f7ff;
+	--rj-hero-muted: #9fb0c8;
+	--rj-hero-accent: #62a7ff;
+	--rj-hero-line: rgba(148, 163, 184, .22);
+
+	/* Everything else follows the active theme. */
+	--rj-surface: var(--bg-light, #fff);
+	--rj-muted: var(--gray, #8898aa);
+	--rj-line: rgba(136, 152, 170, .34);
+	--rj-tint: rgba(136, 152, 170, .12);
+	--rj-shadow: 0 1px 2px rgba(23, 43, 77, .06);
+
 	--rj-radius: 16px;
 	--rj-gap: 1rem;
 }
@@ -24,10 +45,10 @@
 .ruijie-dashboard {
 	margin: 1rem 0 1.25rem;
 	overflow: hidden;
-	border: 1px solid var(--rj-border);
+	border: 1px solid var(--rj-line);
 	border-radius: var(--rj-radius);
-	background: radial-gradient(circle at 90% -20%, rgba(62, 125, 221, .32), transparent 44%), var(--rj-bg);
-	color: var(--rj-text);
+	background: radial-gradient(circle at 90% -20%, rgba(62, 125, 221, .32), transparent 44%), var(--rj-hero-bg);
+	color: var(--rj-hero-text);
 	box-shadow: 0 12px 30px rgba(5, 13, 27, .24);
 }
 
@@ -43,14 +64,14 @@
 	margin: 0;
 	border: 0;
 	background: transparent;
-	color: var(--rj-text);
+	color: var(--rj-hero-text);
 	font-size: 1.25rem;
 	font-weight: 650;
 }
 
 .ruijie-hero p {
 	margin: .35rem 0 0;
-	color: var(--rj-muted);
+	color: var(--rj-hero-muted);
 	font-size: .78rem;
 }
 
@@ -59,7 +80,7 @@
 	align-items: center;
 	gap: .5rem;
 	padding: .45rem .8rem;
-	border: 1px solid var(--rj-border);
+	border: 1px solid var(--rj-hero-line);
 	border-radius: 999px;
 	background: rgba(255, 255, 255, .06);
 	font-size: .82rem;
@@ -83,21 +104,21 @@
 	display: grid;
 	grid-template-columns: repeat(3, minmax(0, 1fr));
 	gap: 1px;
-	border-top: 1px solid var(--rj-border);
-	border-bottom: 1px solid var(--rj-border);
-	background: var(--rj-border);
+	border-top: 1px solid var(--rj-hero-line);
+	border-bottom: 1px solid var(--rj-hero-line);
+	background: var(--rj-hero-line);
 }
 
 .ruijie-card {
 	min-height: 78px;
 	padding: 1rem 1.25rem;
-	background: var(--rj-panel);
+	background: var(--rj-hero-panel);
 }
 
 .ruijie-card span,
 .ruijie-card small {
 	display: block;
-	color: var(--rj-muted);
+	color: var(--rj-hero-muted);
 	font-size: .78rem;
 }
 
@@ -105,7 +126,7 @@
 	display: block;
 	margin: .28rem 0 .18rem;
 	overflow: hidden;
-	color: var(--rj-text);
+	color: var(--rj-hero-text);
 	font-size: 1rem;
 	font-weight: 650;
 	text-overflow: ellipsis;
@@ -120,17 +141,18 @@
 	background: rgba(6, 14, 28, .34);
 }
 
-.ruijie-summary b { color: var(--rj-accent); font-size: .8rem; }
+.ruijie-summary b { color: var(--rj-hero-accent); font-size: .8rem; }
 .ruijie-summary span { overflow-wrap: anywhere; color: #c7d5e8; font-size: .84rem; }
 
 /* -------------------------------------------------------- CBI sections -- */
 
 #cbi-ruijie .cbi-section {
 	margin-bottom: 1rem;
-	padding: 1.1rem 1.25rem;
-	border: 1px solid var(--rj-border);
+	padding: 1.15rem 1.25rem 1.2rem;
+	border: 1px solid var(--rj-line);
 	border-radius: 14px;
-	background: rgba(17, 27, 45, .5);
+	background: var(--rj-surface);
+	box-shadow: var(--rj-shadow);
 }
 
 #cbi-ruijie .cbi-section > h3 {
@@ -138,12 +160,15 @@
 	padding: 0;
 	border: 0;
 	background: transparent;
-	font-size: 1rem;
+	color: inherit;
+	font-size: .98rem;
 	font-weight: 650;
 }
 
 #cbi-ruijie .cbi-section-descr {
-	margin-bottom: .8rem;
+	/* A description running the full width of a wide screen is hard to read. */
+	max-width: 60rem;
+	margin-bottom: .85rem;
 	color: var(--rj-muted);
 	font-size: .8rem;
 }
@@ -152,34 +177,41 @@
 
 /* A section whose values are all buttons is a toolbar.  CBI emits one
  * .cbi-value per button -- the only shape it can label -- and the theme lays a
- * .cbi-section-node out as a column, so the rows become a grid here.  :has()
- * keeps this in the stylesheet: the class the page script used to inject left
- * every button in a column of its own whenever the script had not run. */
-
-#cbi-ruijie .cbi-section:has(> .cbi-section-node > .cbi-value > .btn),
-#cbi-ruijie .cbi-section:has(> .cbi-section-node > .btn) {
-	padding: .9rem 1rem 1rem;
-}
+ * .cbi-section-node out as a column, so the rows become a wrapping row here.
+ * :has() keeps this in the stylesheet: the class the page script used to inject
+ * left every button in a column of its own whenever the script had not run.
+ *
+ * The buttons share one width and stay together on the left.  Letting each
+ * track grow until the row is full, as the first version did, pushed three
+ * short labels out to the far corners of a wide screen. */
 
 #cbi-ruijie .cbi-section:has(> .cbi-section-node > .cbi-value > .btn) > .cbi-section-node,
 #cbi-ruijie .cbi-section:has(> .cbi-section-node > .btn) > .cbi-section-node {
-	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+	display: flex;
+	flex-wrap: wrap;
 	gap: .55rem;
 }
 
 #cbi-ruijie .cbi-section:has(> .cbi-section-node > .cbi-value > .btn) > .cbi-section-node > .cbi-value {
+	flex: 1 1 9.5rem;
+	max-width: 14rem;
 	margin: 0;
 	padding: 0;
 	border: 0;
 	background: none;
 }
 
+#cbi-ruijie .cbi-section:has(> .cbi-section-node > .btn) > .cbi-section-node > .btn {
+	flex: 1 1 9.5rem;
+	max-width: 14rem;
+}
+
 #cbi-ruijie .cbi-section:has(> .cbi-section-node > .cbi-value > .btn) .btn,
 #cbi-ruijie .cbi-section:has(> .cbi-section-node > .btn) .btn {
 	width: 100%;
-	height: 100%;
-	min-height: 2.6rem;
+	min-height: 2.55rem;
+	border-radius: 10px;
+	font-weight: 600;
 }
 
 /* Manual sections stay out of the way until they are needed. */
@@ -190,15 +222,16 @@
 
 .ruijie-logs {
 	margin: 0 0 1.25rem;
-	border: 1px solid var(--rj-border);
-	border-radius: 14px;
-	background: rgba(6, 14, 28, .5);
 	overflow: hidden;
+	border: 1px solid var(--rj-line);
+	border-radius: 14px;
+	background: var(--rj-surface);
+	box-shadow: var(--rj-shadow);
 }
 
 .ruijie-logs > summary {
 	padding: .85rem 1.25rem;
-	color: var(--rj-text);
+	color: inherit;
 	font-size: .95rem;
 	font-weight: 650;
 	cursor: pointer;
@@ -209,20 +242,20 @@
 .ruijie-logs > summary::before {
 	display: inline-block;
 	width: 1rem;
-	color: var(--rj-accent);
+	color: var(--rj-muted);
 	content: "▸";
 }
 
 .ruijie-logs[open] > summary::before { content: "▾"; }
-.ruijie-logs > summary:hover { background: rgba(255, 255, 255, .04); }
+.ruijie-logs > summary:hover { background: var(--rj-tint); }
 
 .ruijie-logs pre {
 	max-height: 22rem;
 	margin: 0;
 	padding: 1rem 1.25rem;
 	overflow: auto;
-	border-top: 1px solid var(--rj-border);
-	color: #c7d5e8;
+	border-top: 1px solid var(--rj-line);
+	color: var(--rj-muted);
 	font-size: .74rem;
 	line-height: 1.55;
 	white-space: pre-wrap;
