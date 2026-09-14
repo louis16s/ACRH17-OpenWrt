@@ -74,6 +74,15 @@ with_lock() (
 portal() { with_lock portal_request "$@"; }
 reauth() { with_lock reauth_request; }
 
+# Record why no request was sent. Without this the previous attempt's answer
+# stays in $LAST and is read as this attempt's verdict: a stale "portal rejected
+# request" rolls back a password that was never actually put to the portal, and
+# tells the user the portal refused it. Every path out of portal_request that
+# does not reach the network has to leave its own reason behind.
+no_request() {
+	printf '%s: request not sent: %s\n' "$ACTION" "$1" > "$LAST"
+}
+
 portal_request() {
 	ACTION="$1"
 	# Whether the link was believed to be up before this attempt. The portal
@@ -84,6 +93,7 @@ portal_request() {
 	grep -q '^auth_state=online$' "$STATE" 2>/dev/null && WAS_ONLINE=1
 	if ! wan_ready; then
 		save_state authenticating pending 'WAN is not ready; waiting for IPv4 before portal request'
+		no_request 'WAN is not up or has no IPv4 address'
 		echo 'ERROR: WAN is not up or has no IPv4 address'
 		return 1
 	fi
@@ -92,12 +102,12 @@ portal_request() {
 	COOKIE="$(get cookie)"
 	REFERER="$(get referer)"
 	QUERY="$(get query_string)"
-	case "$SERVER" in http://?*|https://?*) ;; *) echo 'ERROR: HTTP(S) server required'; return 1;; esac
-	case "$PORTAL_PATH" in /*) ;; *) echo 'ERROR: portal path must begin with /'; return 1;; esac
+	case "$SERVER" in http://?*|https://?*) ;; *) no_request 'server is not an http(s) URL'; echo 'ERROR: HTTP(S) server required'; return 1;; esac
+	case "$PORTAL_PATH" in /*) ;; *) no_request 'portal path does not begin with /'; echo 'ERROR: portal path must begin with /'; return 1;; esac
 	set -- --data-urlencode "queryString=$QUERY"
 	if [ "$ACTION" = login ]; then
 		USERNAME="$(get username)"
-		[ -n "$USERNAME" ] || { echo 'ERROR: userId required'; return 1; }
+		[ -n "$USERNAME" ] || { no_request 'userId is empty'; echo 'ERROR: userId required'; return 1; }
 		set -- "$@" \
 			--data-urlencode "userId=$USERNAME" \
 			--data-urlencode "password=$(get password_payload)" \
@@ -107,16 +117,30 @@ portal_request() {
 			--data-urlencode "validcode=$(get validcode)" \
 			--data-urlencode "passwordEncrypt=$(get password_encrypt)"
 	fi
-	RESPONSE="$(mktemp /tmp/ruijie-auth.response.XXXXXX)" || return 1
+	RESPONSE="$(mktemp /tmp/ruijie-auth.response.XXXXXX)" || { no_request 'cannot create a temp file for the response'; return 1; }
 	# Bounded response and atomic status update; never send portal payloads to syslog.
 	if request --max-filesize 65536 -o "$RESPONSE" "$@" "${SERVER%/}$PORTAL_PATH" 2>/dev/null; then
 		RESULT="$(jsonfilter -i "$RESPONSE" -e '@.result' 2>/dev/null)"
+		# A JSON null extracts as the literal "null" from some jsonfilter builds.
+		# That is the absence of an answer, not a rejection, and only a real
+		# string the portal chose is evidence about the credential.
+		case "$RESULT" in null) RESULT='';; esac
 		if [ "$RESULT" = success ]; then
 			RC=0
 			printf '%s: portal reported success\n' "$ACTION" > "$RESPONSE"
-		else
+		elif [ -n "$RESULT" ]; then
+			# The portal answered in its own format and did not say success.
+			# This is the only outcome that is evidence about the credential,
+			# so it is the only one allowed to trigger a password rollback.
 			RC=1
-			printf '%s: portal rejected request or returned an unrecognized response\n' "$ACTION" > "$RESPONSE"
+			printf '%s: portal rejected request\n' "$ACTION" > "$RESPONSE"
+		else
+			# Reached the portal but could not read its answer: a redirect, an
+			# HTML error page, a stale query_string after the WAN address
+			# changed. Says nothing about the password, so it must stay
+			# distinct from a rejection.
+			RC=1
+			printf '%s: unexpected portal response\n' "$ACTION" > "$RESPONSE"
 		fi
 	else
 		RC=1
@@ -151,9 +175,17 @@ renew_wan_request() {
 	wan="$(get wan_interface)"
 	case "$wan" in ''|*[!A-Za-z0-9_-]*) echo "Invalid WAN interface"; return 1;; esac
 	if ifdown "$wan" >/dev/null 2>&1 && sleep 2 && ifup "$wan" >/dev/null 2>&1; then
-		save_state authenticating pending "WAN DHCP renewed on $wan"
-		logger -t ruijie-auth "wan-renew interface=$wan rc=0"
-		return 0
+		# ifup returns before DHCP has installed an address, so a bare ifup
+		# proves nothing about the renew. Without this check a renew that
+		# brought the interface up with no lease reported success and left the
+		# UI claiming the WAN had been renewed while it had no IPv4 at all.
+		if wait_wan; then
+			save_state authenticating pending "WAN DHCP renewed on $wan"
+			logger -t ruijie-auth "wan-renew interface=$wan rc=0"
+			return 0
+		fi
+		logger -t ruijie-auth "wan-renew interface=$wan rc=1 (no IPv4 after renew)"
+		return 1
 	fi
 	save_state failed failure "WAN DHCP renew failed on $wan"
 	logger -t ruijie-auth "wan-renew interface=$wan rc=1"
