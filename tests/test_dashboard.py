@@ -1,6 +1,6 @@
 """Layout rules the Ruijie page depends on to look right under argon.
 
-Both checks here guard against a regression that is invisible to every other
+The checks here guard against a regression that is invisible to every other
 test: the page renders, the buttons work, and only the rendering is wrong.
 """
 from pathlib import Path
@@ -39,6 +39,24 @@ class DashboardStylesheetTests(unittest.TestCase):
         self.assertNotIn('ruijie-actions', css)
         self.assertNotIn('ruijie-actions',
                          (STATIC / 'dashboard.js').read_text(encoding='utf-8'))
+
+    def test_section_surfaces_follow_the_theme(self):
+        # The sections were once painted with a fixed translucent navy. That
+        # only looks right on a dark page: over argon's default light theme it
+        # renders as grey mud on white, which is how the page looked until the
+        # surface moved onto the theme's own variables. argon redefines
+        # --bg-light in dark.css, so reading it keeps both modes working.
+        css = (STATIC / 'dashboard.css').read_text(encoding='utf-8')
+        self.assertIn('var(--bg-light', css)
+        self.assertNotIn('rgba(17, 27, 45, .5)', css)
+
+    def test_buttons_are_not_stretched_across_the_row(self):
+        # A 1fr track grows the button until the row is full, which on a wide
+        # screen throws three short labels to opposite corners. The track has
+        # to stop growing instead.
+        css = (STATIC / 'dashboard.css').read_text(encoding='utf-8')
+        self.assertNotIn('minmax(9.5rem, 1fr)', css)
+        self.assertIn('max-width: 14rem', css)
 
 
 if __name__ == '__main__':
