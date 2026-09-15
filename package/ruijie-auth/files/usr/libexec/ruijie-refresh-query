@@ -92,6 +92,25 @@ case "$LOCATION" in
 		exit 1 ;;
 esac
 
+# The portal address is the origin of that same redirect, and it is the half of
+# the capture that cannot be copied from anywhere else either: a reflash resets
+# ruijie.main.server to empty along with the query string, and ruijie-auth
+# refuses to build a request without it. The path and the query live in
+# login_path and query_string, so only scheme://host[:port] belongs here -- cut
+# at the first "/". Anything that is not an http(s) URL with a host is refused
+# rather than stored: a scheme-less Location would put a value in server that
+# portal_request can only turn down.
+origin_of() {
+	case "$1" in
+		http://*|https://*) ;;
+		*) return 1 ;;
+	esac
+	host="${1#*://}"
+	host="${host%%/*}"
+	[ -n "$host" ] || return 1
+	printf '%s://%s' "${1%%://*}" "$host"
+}
+
 # Refuse to store a truncated or unrelated string. A real query string always
 # carries the client address and MAC, both encrypted, so both must be present
 # and non-empty. A case pattern cannot express that: "?" is a glob wildcard and
@@ -103,13 +122,20 @@ if [ -z "$(field "$QUERY" wlanuserip)" ] || [ -z "$(field "$QUERY" mac)" ]; then
 fi
 
 OLD="$(get query_string)"
+OLD_SERVER="$(get server)"
+SERVER="$(origin_of "$LOCATION")"
 uci set "$CFG.query_string=$QUERY"
+# An empty origin is not a reason to drop a query string that passed the checks
+# above, and it is not a reason to erase a portal address somebody filled in by
+# hand either: leave that value alone and let the output say it was not seen.
+[ -n "$SERVER" ] && uci set "$CFG.server=$SERVER"
 uci commit ruijie
-logger -t ruijie-auth "query-string refreshed for $WAN_IP"
+logger -t ruijie-auth "query-string refreshed for $WAN_IP (portal ${SERVER:-none})"
 
 echo "WAN      : $WAN_IP"
 echo "旧 query : $OLD"
 echo "新 query : $QUERY"
+echo "门户地址 : ${SERVER:-未识别（重定向里没有 origin）}"
 echo
 
 if [ "$1" = capture ]; then
@@ -122,11 +148,19 @@ save_state authenticating pending 'query string refreshed; authenticating'
 /usr/libexec/ruijie-auth reauth && exit 0
 
 # A capture that does not authenticate is worse than the value it replaced, so
-# put the previous string back and let the normal retry path run.
+# put the previous string back and let the normal retry path run. The portal
+# address came out of the same Location as the query, so it goes back with it:
+# a new server next to the old query is a pair that never existed, and the next
+# login would be sent to a portal that does not know this string.
 if [ -n "$OLD" ]; then
 	uci set "$CFG.query_string=$OLD"
+	restored='the previous query string'
+	if [ -n "$SERVER" ]; then
+		uci set "$CFG.server=$OLD_SERVER"
+		restored='the previous query string and portal address'
+	fi
 	uci commit ruijie
-	logger -t ruijie-auth "reauth failed; restored the previous query string for $WAN_IP"
-	echo 'reauth failed; restored the previous query string'
+	logger -t ruijie-auth "reauth failed; restored $restored for $WAN_IP"
+	echo "reauth failed; restored $restored"
 fi
 exit 1
