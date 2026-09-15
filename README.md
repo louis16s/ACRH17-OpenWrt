@@ -455,3 +455,37 @@ argon` 是空的，`90-acrh17` 里设置 `argon.main.mode=dark` 的那段在升�
 两位」而不输出明文，当前显示 11 位、末两位 `17`，与 8 位、末两位 `As` 的新密码
 对不上；`password_prev` 为空，`logger` 里也没有任何 `ruijie-password` 记录，
 说明新密码从未被启用过，回退点也从未被占用。
+
+## 2026-09-15 刷机后检测与修复脚本
+
+此前所有验证都发生在仓库这一侧：离线镜像的结构与哈希、CI 里的 network namespace
+透明改写、Kconfig 符号。这些能证明镜像是对的，不能回答「这台刚刷完的机器现在到底
+对不对」——而那正是刷完机站在路由器旁边时唯一想知道的事。`scripts/acrh17-doctor.sh`
+就是补这一段的。
+
+一个脚本，两种跑法，内容完全相同：
+
+```sh
+./scripts/acrh17-doctor.sh --host root@192.168.5.1        # 从开发机 ssh 送过去跑
+ssh root@192.168.5.1 'sh -s' < scripts/acrh17-doctor.sh   # 或直接在路由器上跑
+```
+
+默认是 `check`，只读，不改任何配置；`fix` 在此基础上把安全项修回去。检查按平台与
+版本、升级保留、服务开关、网络、UA3F、无线、锐捷认证、软件包与 USB、最近日志九组
+展开，覆盖的都是前几节里踩过的坑：`sysupgrade` 重建 `rootfs_data` 后 watchcat/ddns/
+mwan3 需要重新禁用、`90-acrh17` 的守卫是否真的跳过了出厂默认、UA3F 或 mwan3 在跑时
+TurboACC 的三个卸载必须为 0、UA3F 的 L3 重写三元组、`mwan3.globals.mmx_mask` 与
+`0xffff` 掩码、dnsmasq 的 DNS 分流与 SmartDNS 的回环监听、锐捷配置 0600 与密码状态
+机是否还自洽。
+
+边界是刻意划的。会断线或者会覆盖用户选择的修复不进默认路径：LAN 地址、WAN 协议和
+Wi-Fi 密码只报告不修改，2.4G/5G 选台要 `--fix-wifi`，门户重新认证要 `--fix-auth`。
+任何模式下都不打印密码明文，掩码规则与 `ruijie-password` 保持一致（位数 + 末两位）。
+`fix` 的每一项都是幂等的，修完再跑一次 `check` 应当干净无 FAIL。
+
+`tests/test_doctor.py` 用假根目录加假 `PATH` 覆盖它，18 项。其中两条是这套东西能用
+的前提：一条逐字节比对 `check` 前后的整棵假根目录，证明只读模式真的什么都没动；一条
+在 `fix` 之后再跑一次 `check`，证明修复收敛而不是每次都报同一批问题。另外一组同步
+测试把脚本里的常量钉死在仓库事实上——服务开关列表对 `90-acrh17`、TurboACC 的键对
+`patch-turboacc-runtime.py`、日志字符串对运行时补丁、DNS 条目对 `uci-defaults`、
+keep.d 条目对 `files/lib/upgrade/keep.d/acrh17`，上游改了而这里没跟着改就会直接变红。
