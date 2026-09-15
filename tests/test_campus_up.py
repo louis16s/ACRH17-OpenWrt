@@ -73,6 +73,8 @@ class Fixture:
         self.curl_spec = self.base / 'curl.json'
         self.auth_status = self.base / 'auth-status'
         self.login_rc = self.base / 'login-rc'
+        self.pw_accept = self.base / 'pw-accept'
+        self.pw_mode = self.base / 'pw-mode'
         self.uci = dict(FLASHED)
         self.rc_d_link = False
         self.root.mkdir(parents=True)
@@ -100,12 +102,32 @@ class Fixture:
         self.set_redirect(PORTAL)
         self.set_auth(online=False)
         self.set_login_rc(0)
+        self.set_accepted_password('')
+        self.set_password_mode('reject')
         self.write_stubs()
         self.write_services()
         self.save_uci()
 
     def write_services(self):
-        """设备上的两个可执行文件：认证程序和它的 init 脚本。"""
+        """设备上的可执行文件：认证程序、改密码的程序，以及 init 脚本。"""
+        # ruijie-password 的桩：只认 pw-accept 里那一个密码，其余按 pw-mode 表态。
+        # 它照真实行为更新 UCI——被拒绝时什么都不留，就像真脚本回退到上一个值。
+        self.write('usr/libexec/ruijie-password', (
+            '#!/bin/sh\n'
+            f'echo "ruijie-password $*" >> {self.calls}\n'
+            '[ "$1" = set ] || exit 0\n'
+            'pw="$2"\n'
+            f'if [ -n "$(cat {self.pw_accept} 2>/dev/null)" ] && '
+            f'[ "$pw" = "$(cat {self.pw_accept})" ]; then\n'
+            f'  uci set "ruijie.main.password_payload=$pw"\n'
+            '  uci commit ruijie\n'
+            '  exit 0\n'
+            'fi\n'
+            f'case "$(cat {self.pw_mode} 2>/dev/null)" in\n'
+            '  unverified) exit 2 ;;\n'
+            '  locked) exit 75 ;;\n'
+            'esac\n'
+            'exit 1\n'), 0o755)
         self.write('usr/libexec/ruijie-auth', (
             '#!/bin/sh\n'
             f'echo "ruijie-auth $*" >> {self.calls}\n'
@@ -178,6 +200,14 @@ class Fixture:
 
     def set_login_rc(self, rc):
         self.login_rc.write_text(str(rc), encoding='utf-8')
+
+    def set_accepted_password(self, password):
+        """哪个候选密码会被门户接受；空字符串表示全都拒绝。"""
+        self.pw_accept.write_text(password, encoding='utf-8')
+
+    def set_password_mode(self, mode):
+        """候选密码被打回时 ruijie-password 的退出码：unverified=2，locked=75。"""
+        self.pw_mode.write_text(mode, encoding='utf-8')
 
     def add_rc_d_link(self):
         (self.root / 'etc/rc.d').mkdir(exist_ok=True)
@@ -610,6 +640,122 @@ class RepairTests(CampusTestCase):
         self.assertEqual(f.log().count('init enable'), 1)
 
 
+class PasswordCandidateTests(CampusTestCase):
+    """--password 让 fix 一次走完；每个候选都要经过真实登录验证才留下。"""
+
+    def attempts(self):
+        return [line for line in self.fixture.log()
+                if line.startswith('ruijie-password set')]
+
+    def test_first_candidate_wins_and_nothing_else_is_tried(self):
+        f = self.flashed_with_credentials(password='')
+        f.set_accepted_password('FIRST-OK')
+        result = f.run('--user', '20262159017', '--password', 'FIRST-OK',
+                       '--password', 'SECOND', mode='fix')
+        self.assertEqual(f.uci_now()['ruijie.main.password_payload'], 'FIRST-OK')
+        self.assertEqual(len(self.attempts()), 1, result.stdout)
+        self.assertIn('第 1 个候选密码通过门户验证', result.stdout)
+
+    def test_a_rejected_candidate_falls_through_to_the_next(self):
+        f = self.flashed_with_credentials(password='')
+        f.set_accepted_password('SECOND-OK')
+        result = f.run('--user', '20262159017', '--password', 'WRONG',
+                       '--password', 'SECOND-OK', mode='fix')
+        self.assertEqual(f.uci_now()['ruijie.main.password_payload'], 'SECOND-OK')
+        self.assertEqual(len(self.attempts()), 2, result.stdout)
+        self.assertIn('第 1 个候选密码被门户拒绝，已自动回退', result.stdout)
+        self.assertIn('第 2 个候选密码通过门户验证', result.stdout)
+
+    def test_the_candidate_that_worked_is_the_one_that_goes_online(self):
+        f = self.flashed_with_credentials(password='')
+        f.set_accepted_password('SECOND-OK')
+        f.set_auth(online=True)
+        result = f.run('--user', '20262159017', '--password', 'WRONG',
+                       '--password', 'SECOND-OK', mode='fix')
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(f.uci_now()['ruijie.main.enabled'], '1')
+        self.assertIn('连通性探测通过', result.stdout)
+
+    def test_every_candidate_rejected_leaves_no_password_and_no_service(self):
+        f = self.flashed_with_credentials(password='')
+        f.set_accepted_password('')
+        result = f.run('--user', '20262159017', '--password', 'A', '--password', 'B',
+                       mode='fix')
+        self.assertEqual(f.uci_now()['ruijie.main.password_payload'], '')
+        self.assertEqual(f.uci_now()['ruijie.main.enabled'], '0')
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('还没有校园网密码', result.stdout)
+
+    def test_an_existing_password_is_left_alone(self):
+        """重设一个没被投诉过的密码就是白白断一次线。"""
+        f = self.flashed_with_credentials(password='ALREADY-SET')
+        result = f.run('--password', 'SOMETHING-ELSE', mode='fix')
+        self.assertEqual(self.attempts(), [], result.stdout)
+        self.assertEqual(f.uci_now()['ruijie.main.password_payload'], 'ALREADY-SET')
+
+    def test_unverified_candidate_stops_instead_of_guessing_again(self):
+        """退出码 2 意味着这次尝试没有产生任何关于密码的证据，不该拿它当拒绝。"""
+        f = self.flashed_with_credentials(password='')
+        f.set_accepted_password('NEVER')
+        f.set_password_mode('unverified')
+        result = f.run('--user', '20262159017', '--password', 'A', '--password', 'B',
+                       mode='fix')
+        self.assertEqual(len(self.attempts()), 1, result.stdout)
+        self.assertIn('没能验证', result.stdout)
+
+    def test_busy_lock_stops_the_sequence(self):
+        f = self.flashed_with_credentials(password='')
+        f.set_accepted_password('NEVER')
+        f.set_password_mode('locked')
+        result = f.run('--user', '20262159017', '--password', 'A', '--password', 'B',
+                       mode='fix')
+        self.assertEqual(len(self.attempts()), 1, result.stdout)
+        self.assertIn('正持锁', result.stdout)
+
+    def test_candidates_are_not_tried_in_check_mode(self):
+        f = self.flashed_with_credentials(password='')
+        f.set_accepted_password('FIRST-OK')
+        before = dict(f.uci_now())
+        result = f.run('--user', '20262159017', '--password', 'FIRST-OK', mode='check')
+        self.assertEqual(self.attempts(), [], result.stdout)
+        self.assertEqual(f.uci_now(), before)
+
+    def test_the_password_never_reaches_the_output(self):
+        f = self.flashed_with_credentials(password='')
+        f.set_accepted_password('S3CRET-CANDIDATE')
+        f.set_auth(online=True)
+        result = f.run('--user', '20262159017', '--password', 'S3CRET-CANDIDATE',
+                       mode='fix')
+        for stream in (result.stdout, result.stderr):
+            self.assertNotIn('S3CRET-CANDIDATE', stream)
+        # 但配置里确实写进去了，掩码能看出是哪一个。
+        self.assertEqual(f.uci_now()['ruijie.main.password_payload'], 'S3CRET-CANDIDATE')
+        self.assertIn('16 位，末两位 TE', result.stdout)
+
+    def test_one_command_takes_a_flashed_router_online(self):
+        """用户唯一要做的动作是切到路由器的网络上。"""
+        f = self.fixture
+        f.uci['ruijie.main.username'] = ''
+        f.uci['ruijie.main.password_payload'] = ''
+        f.save_uci()
+        f.set_accepted_password('443988As')
+        f.set_auth(online=True)
+        result = f.run('--user', '20262159017', '--password', '20262159017',
+                       '--password', '443988As', mode='fix')
+        self.assertEqual(result.returncode, 0, result.stdout)
+        uci = f.uci_now()
+        self.assertEqual(uci['ruijie.main.server'], 'http://172.16.0.1')
+        self.assertEqual(uci['ruijie.main.query_string'], QUERY)
+        self.assertEqual(uci['ruijie.main.username'], '20262159017')
+        self.assertEqual(uci['ruijie.main.password_payload'], '443988As')
+        self.assertEqual(uci['ruijie.main.enabled'], '1')
+        self.assertTrue((f.root / 'etc/rc.d/S95ruijie-auth').exists())
+        self.assertIn('连通性探测通过', result.stdout)
+        # 跑完再查一次应当是干净的。
+        second = f.run(mode='check')
+        self.assertEqual(second.returncode, 0, second.stdout)
+
+
 class RemoteModeTests(CampusTestCase):
     """--host 把脚本经 ssh 送过去跑；这条路径不走假根目录，走的是 ssh 本身。"""
 
@@ -624,9 +770,11 @@ class RemoteModeTests(CampusTestCase):
         self.fixture.calls.write_text('', encoding='utf-8')
 
     def ssh_call(self):
-        lines = [line for line in self.fixture.log() if line.startswith('ssh ')]
-        self.assertEqual(len(lines), 1, lines)
-        return lines[0]
+        # 一次运行只有一条 ssh 记录，而它总是最后写的。整段读取而不是按行读：
+        # 候选密码里带着换行，按行切会把同一条命令行拆成好几行。
+        text = self.fixture.calls.read_text(encoding='utf-8')
+        self.assertTrue(text.startswith('ssh '), text)
+        return text.rstrip('\n')
 
     def run_remote(self, *args):
         env = dict(os.environ)
@@ -655,6 +803,12 @@ class RemoteModeTests(CampusTestCase):
         self.assertIn("ACRH17_CAMPUS_USER='2021999999'", call)
         self.assertIn("ACRH17_CAMPUS_SERVER='http://172.16.0.9'", call)
         self.assertIn('sh -s', call)
+
+    def test_candidates_are_carried_into_the_remote_command(self):
+        self.run_remote('--password', 'FIRST', '--password', 'SECOND', '--ssh-key', '/k')
+        call = self.ssh_call()
+        # 两个候选都要到场，顺序不能丢：第一个被拒时才有第二个可试。
+        self.assertIn("ACRH17_CAMPUS_PASSWORDS='FIRST\nSECOND\n'", call)
 
     def test_a_quote_in_an_argument_is_refused(self):
         result = self.run_remote('--user', "2021'; rm -rf /")
