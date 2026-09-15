@@ -62,6 +62,12 @@ UCI = {
     'ua3f.main.l3_rewrite_ttl_value': '64',
     'ua3f.main.l3_rewrite_tcpts': '1',
     'p910nd.@p910nd[0].enabled': '0',
+    'smartdns.@smartdns[0].enabled': '1',
+    'smartdns.@smartdns[0].port': '6053',
+    # 真机上 SmartDNS 限的是入口设备（SO_BINDTODEVICE），监听地址仍然是通配的：
+    # netstat 里看到 0.0.0.0:6053 不等于局域网能查。
+    'smartdns.@smartdns[0].bind_device': '1',
+    'smartdns.@smartdns[0].bind_device_name': 'lo',
     'ruijie.main.enabled': '1',
     'ruijie.main.username': '2021123456',
     'ruijie.main.server': 'http://172.16.0.1',
@@ -153,7 +159,17 @@ PROCESSES = """/usr/bin/ua3f /etc/ua3f/config.yaml
 /usr/libexec/ruijie-auth daemon
 """
 
-NETSTAT = "tcp        0      0 127.0.0.1:6053          0.0.0.0:*               LISTEN\n"
+# 真机上 SmartDNS 的监听地址是通配的：bind_device 用 SO_BINDTODEVICE 限入口设备，
+# 不体现在这个地址上。
+NETSTAT = "tcp        0      0 0.0.0.0:6053            0.0.0.0:*               LISTEN\n"
+IWINFO_LIST = ('wlan0     ESSID: "ACRH17-5G"\n'
+               '          Mode: Master  Channel: 36 (5.180 GHz)\n'
+               'wlan1     ESSID: "ACRH17-2.4G"\n'
+               '          Mode: Master  Channel: 6 (2.437 GHz)\n')
+IWINFO_INFO = ('wlanX     ESSID: "ACRH17-X"\n'
+               '          Access Point: 00:11:22:33:44:55\n'
+               '          Mode: Master  Channel: %s (2.437 GHz)\n'
+               '          Center Channel 1: %s (2.437 GHz)\n')
 DF = "Filesystem     1K-blocks    Used Available Use% Mounted on\n/dev/root          10240    2048      8192  20% /overlay\n"
 NFT_RULES = "meta mark & 0xffff == 7894 tproxy to :7895\n"
 LOGREAD = "Mon Sep 15 09:00:00 2026 user.info ruijie-auth: login rc=0\n"
@@ -266,8 +282,18 @@ class Fixture:
         self.command('nft', f'#!/bin/sh\nprintf %s "{NFT_RULES}"\n')
         self.command('uname', '#!/bin/sh\necho 6.6.151\n')
         self.command('logread', f'#!/bin/sh\nprintf %s "{LOGREAD}"\n')
-        for name in ('ip', 'sysctl', 'iwinfo', 'ubus', 'jsonfilter'):
+        for name in ('ip', 'sysctl', 'ubus', 'jsonfilter'):
             self.command(name, '#!/bin/sh\nexit 0\n')
+        # iwinfo 把信道写在 Mode 行的中间，真机格式是 fixture 必须还原的部分之一：
+        # 空 stub 会让「按行首锚定」这种坏正则看起来是好的。
+        self.command('iwinfo', (
+            '#!/bin/sh\n'
+            'case "$1" in\n'
+            '  wlan0) channel=36 ;;\n'
+            '  wlan1) channel=6 ;;\n'
+            f"  *) printf %s '{IWINFO_LIST}'; exit 0 ;;\n"
+            'esac\n'
+            f"printf '{IWINFO_INFO}' \"$channel\" \"$channel\"\n"))
         self.command('uci', self.uci_mock())
 
     def command(self, name, text):
@@ -468,6 +494,46 @@ class DetectionTests(DoctorTestCase):
         out = self.fixture.run().stdout
         self.assertIn('门户探测: 已联网，但状态文件写的是 failed', out)
         self.assertNotIn('[FIX ]', out)
+
+    def test_loopback_binding_comes_from_uci_not_the_listen_address(self):
+        # 真机上端口听在通配地址上而配置是对的（SO_BINDTODEVICE 不体现在地址里），
+        # 按监听地址判会把这份正确的配置报成「没绑回环」。
+        out = self.fixture.run().stdout
+        self.assertIn('SmartDNS 只收 lo 的查询', out)
+        self.assertNotIn('没绑回环', out)
+
+        self.fixture.uci['smartdns.@smartdns[0].bind_device'] = '0'
+        self.fixture.save_uci()
+        out = self.fixture.run().stdout
+        self.assertIn('SmartDNS 没绑回环', out)
+
+    def test_permissions_are_read_when_stat_is_unusable(self):
+        # busybox 不一定编进 stat，GNU 的 -c 与 BSD 的 -f 又互不兼容；真机上两条都
+        # 失败，权限检查整段静默地「通过」了。读数不能靠 stat。
+        self.fixture.command('stat', '#!/bin/sh\nexit 1\n')
+        out = self.fixture.run().stdout
+        self.assertIn('/etc/config/ruijie 权限 0600', out)
+        self.assertIn('ruijie-auth 权限 0755', out)
+
+    def test_running_channel_is_parsed_from_iwinfo(self):
+        # 信道在 Mode 行的中间，不是行首；iwinfo 的续行也不该被当成网卡名。
+        out = self.fixture.run().stdout
+        self.assertIn('运行态 wlan0 信道 36', out)
+        self.assertIn('运行态 wlan1 信道 6', out)
+        self.assertNotIn('运行态 Mode:', out)
+
+    def test_unconfigured_ruijie_is_reported_without_noise(self):
+        # 没配置不是故障：三个空字段不该各报一条 WARN 把真故障淹掉。
+        for key in ('username', 'server', 'query_string', 'password_payload',
+                    'password_original'):
+            self.fixture.uci[f'ruijie.main.{key}'] = ''
+        self.fixture.save_uci()
+        out = self.fixture.run().stdout
+        self.assertIn('锐捷认证还没配置', out)
+        self.assertIn('还没有锐捷密码（服务尚未配置，属正常）', out)
+        for key in ('username', 'server', 'query_string'):
+            self.assertNotIn(f'ruijie.main.{key} 是空的', out)
+        self.assertNotIn('还没有可用的锐捷密码', out)
 
 
 class RepairTests(DoctorTestCase):
