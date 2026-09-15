@@ -40,6 +40,8 @@ HOST=''
 SSH_KEY="${ACRH17_SSH_KEY:-}"
 USER_ARG="${ACRH17_CAMPUS_USER:-}"
 SERVER_ARG="${ACRH17_CAMPUS_SERVER:-}"
+# 换行分隔的候选密码。只有配置里还没有密码时才会用到它们。
+PW_LIST="${ACRH17_CAMPUS_PASSWORDS:-}"
 CFG='ruijie.main'
 
 usage() {
@@ -49,6 +51,9 @@ usage() {
   check                只读检测（默认）
   fix                  写入门户地址、query_string 与学号，凭据齐全时打开服务并登录
   --user 学号          写入 ruijie.main.username
+  --password 密码      可重复。配置里还没有密码时，按给出的顺序逐个交给
+                       ruijie-password set 做真实登录验证，第一个被门户接受的留下，
+                       被拒绝的自动回退。已经在用的密码不会被重设（那是白白断线）。
   --server URL         手工指定门户地址（重定向里推不出来时用）
   --host [user@]地址   从开发机远程执行
   --ssh-key 路径       远程模式用的私钥；ssh 只会自动尝试 id_rsa/id_ecdsa/id_ed25519
@@ -56,7 +61,7 @@ usage() {
                        Permission denied (publickey)
   -h, --help           显示本帮助
 
-密码不由本脚本设置，见文件头注释。
+不给出 --password 时密码不会被本脚本碰，请自己跑 ruijie-password set。
 EOF
 }
 
@@ -67,6 +72,11 @@ while [ $# -gt 0 ]; do
 		check|fix) MODE="$arg" ;;
 		--user) USER_ARG="${1:-}"; [ $# -gt 0 ] && shift ;;
 		--user=*) USER_ARG="${arg#--user=}" ;;
+		# 多次给出就按顺序排队；换行分隔，密码里的空格与 $ 都不会被再展开一次。
+		--password) PW_LIST="${PW_LIST}${1:-}
+"; [ $# -gt 0 ] && shift ;;
+		--password=*) PW_LIST="${PW_LIST}${arg#--password=}
+" ;;
 		--server) SERVER_ARG="${1:-}"; [ $# -gt 0 ] && shift ;;
 		--server=*) SERVER_ARG="${arg#--server=}" ;;
 		--host) HOST="${1:-}"; [ $# -gt 0 ] && shift ;;
@@ -78,8 +88,8 @@ while [ $# -gt 0 ]; do
 	esac
 done
 
-# 这两个值要原样嵌进 ssh 的远程命令串，单引号会破坏引号配对。
-case "${USER_ARG}${SERVER_ARG}" in
+# 这几个值要原样嵌进 ssh 的远程命令串，单引号会破坏引号配对。
+case "${USER_ARG}${SERVER_ARG}${PW_LIST}" in
 	*"'"*) echo '参数里不能有单引号。' >&2; exit 2;;
 esac
 
@@ -93,7 +103,7 @@ if [ -n "$HOST" ]; then
 	set --
 	[ -z "$SSH_KEY" ] || set -- -i "$SSH_KEY" -o IdentitiesOnly=yes
 	exec ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new "$@" "$HOST" \
-		"ACRH17_CAMPUS_MODE=${MODE} ACRH17_CAMPUS_USER='${USER_ARG}' ACRH17_CAMPUS_SERVER='${SERVER_ARG}' sh -s" < "$0"
+		"ACRH17_CAMPUS_MODE=${MODE} ACRH17_CAMPUS_USER='${USER_ARG}' ACRH17_CAMPUS_SERVER='${SERVER_ARG}' ACRH17_CAMPUS_PASSWORDS='${PW_LIST}' sh -s" < "$0"
 fi
 
 if [ ! -f "${ROOT}/etc/openwrt_release" ]; then
@@ -312,7 +322,6 @@ if [ -n "$USER_ARG" ] && [ "$USER_ARG" != "$USERNAME" ]; then
 	fi
 fi
 
-PASSWORD="$(get password_payload)"
 CREDS=1
 
 if [ -n "$USERNAME" ]; then
@@ -322,10 +331,45 @@ else
 	CREDS=0
 fi
 
+PASSWORD="$(get password_payload)"
+
+# 候选密码走 ruijie-password set，而不是直接写 UCI：它自己会拿这个密码做一次
+# 真实登录，被门户拒绝就把上一个值放回去。猜错一个候选不会留下一个坏密码，
+# 也不会让「密码对不对」变成没人验证过的假设。已经在用的密码不动——重设一次
+# 等于白白断一次线，而那个密码本来就没被投诉过。
+if [ -n "$PW_LIST" ] && [ -z "$PASSWORD" ] && [ "$MODE" = fix ]; then
+	index=0
+	while IFS= read -r pw; do
+		[ -n "$pw" ] || continue
+		index=$((index + 1))
+		PW_OUT="${ROOT}/tmp/ruijie-pw.$$"
+		PW_RC=0
+		"${ROOT}/usr/libexec/ruijie-password" set "$pw" > "$PW_OUT" 2>&1 || PW_RC=$?
+		# 该命令的输出只含掩码，但明文没必要在任何地方多留一份。
+		rm -f "$PW_OUT"
+		case "$PW_RC" in
+		0)
+			fixed "第 ${index} 个候选密码通过门户验证"
+			PASSWORD="$(get password_payload)"
+			break ;;
+		1)
+			warn "第 ${index} 个候选密码被门户拒绝，已自动回退" ;;
+		75)
+			warn '另一个认证动作正持锁，候选密码没能验证'; break ;;
+		*)
+			warn "第 ${index} 个候选密码已写入但没能验证（请求没送达门户，或答复读不懂）"
+			break ;;
+		esac
+	done <<EOF
+$PW_LIST
+EOF
+	PASSWORD="$(get password_payload)"
+fi
+
 if [ -n "$PASSWORD" ]; then
 	ok "密码已配置（$(mask "$PASSWORD")）"
 else
-	fail '还没有校园网密码：跑 /usr/libexec/ruijie-password set <密码>'
+	fail '还没有校园网密码：用 --password 给一个，或自己跑 /usr/libexec/ruijie-password set <密码>'
 	CREDS=0
 fi
 
@@ -423,12 +467,16 @@ printf '通过 %s｜警告 %s｜失败 %s｜已修复 %s\n' "$CNT_OK" "$CNT_WARN
 if [ "$CREDS" != 1 ] && [ "$MODE" = fix ]; then
 	cat <<EOF
 
-还差凭据，按这个顺序补齐：
-  1. 本脚本（已把 server / query_string / 学号 配好）
-  2. /usr/libexec/ruijie-password set '<密码>'    真实登录验证，被拒自动回退
-  3. 再跑一次本脚本的 fix                          打开认证服务并登录
-不要把密码写进本脚本的参数：它要求 server 与 username 已就位才验证，
-顺序反了密码会被写入而没有被验证。
+还差凭据。一次跑完：
+  acrh17-campus-up.sh fix --user <学号> --password <密码>
+候选密码按给出的顺序逐个验证，被门户拒绝的自动回退，第一个通过验证的留下。
+
+也可以分三步手动来：
+  1. 本脚本的 fix（已把 server / query_string / 学号 配好）
+  2. /usr/libexec/ruijie-password set '<密码>'   真实登录验证，被拒自动回退
+  3. 再跑一次本脚本的 fix                         打开认证服务并登录
+不管走哪条路，server 与 username 都得先就位：ruijie-password 是靠一次真实登录
+验证密码的，请求发不出去时它只把密码写进配置，没有任何东西验证过它。
 EOF
 fi
 
