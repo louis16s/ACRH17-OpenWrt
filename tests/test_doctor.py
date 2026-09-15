@@ -429,7 +429,13 @@ class DoctorTestCase(unittest.TestCase):
         for service in ('watchcat', 'ddns'):
             (f.root / 'etc/rc.d' / f'S95{service}').symlink_to(
                 f.root / 'etc/init.d' / service)
-        (f.root / 'var/run/mwan3').mkdir(parents=True)
+        # 造出真机上的残留目录：空的 mkdir 是个骗人的夹具，rmdir 能删掉一个
+        # 空目录，于是「用 rmdir 清理」这个从来没生效过的修复在测试里一直是绿的。
+        # 真机上 mwan3 退出时留下的一定是这些东西（09-15 现场看到的就是）。
+        stale = f.root / 'var/run/mwan3'
+        (stale / 'iface_state').mkdir(parents=True)
+        (stale / 'iptables_log').mkdir()
+        (stale / 'mmx_mask').write_text('0x3f000000\n', encoding='utf-8')
         f.uci['turboacc.config.sw_flow'] = '1'
         f.uci['turboacc.config.hw_flow'] = '1'
         f.uci['ua3f.main.l3_rewrite_ttl_value'] = '128'
@@ -477,16 +483,27 @@ class DetectionTests(DoctorTestCase):
         self.assertIn('LAN 地址是 10.0.0.1', out)
         self.assertEqual(self.fixture.uci_now()['network.lan.ipaddr'], '10.0.0.1')
 
-    def test_wireless_channel_is_only_rewritten_with_the_flag(self):
-        self.fixture.uci['wireless.radio0.channel'] = '11'
+    def test_wireless_mode_is_only_rewritten_with_the_flag(self):
+        self.fixture.uci['wireless.radio0.htmode'] = 'NOHT'
         self.fixture.save_uci()
         out = self.fixture.run().stdout
-        self.assertIn('实测选台是 ch6/HT20', out)
-        self.assertEqual(self.fixture.uci_now()['wireless.radio0.channel'], '11')
+        self.assertIn('模式是 NOHT，应为 HT20', out)
+        self.assertEqual(self.fixture.uci_now()['wireless.radio0.htmode'], 'NOHT')
 
         out = self.fixture.run('--fix-wifi').stdout
-        self.assertIn('改回 ch6/HT20', out)
-        self.assertEqual(self.fixture.uci_now()['wireless.radio0.channel'], '6')
+        self.assertIn('模式改回 HT20', out)
+        self.assertEqual(self.fixture.uci_now()['wireless.radio0.htmode'], 'HT20')
+
+    def test_the_channel_is_never_rewritten_not_even_by_the_flag(self):
+        # 09-14 把 2.4G 定成 ch6，09-15 三次复扫证明 ch1 好 20 dB。信道随射频
+        # 环境变，写死的值在环境变了以后只会帮倒忙，所以 --fix-wifi 也不碰它。
+        self.fixture.uci['wireless.radio0.channel'] = '11'
+        self.fixture.save_uci()
+        for args in ((), ('--fix-wifi',), ()):
+            out = self.fixture.run(*args).stdout
+            self.assertEqual(self.fixture.uci_now()['wireless.radio0.channel'], '11')
+            self.assertEqual(self.fixture.uci_now()['wireless.radio1.channel'], '36')
+            self.assertNotIn('实测选台', out)
 
     def test_stale_auth_state_is_reported_not_forced(self):
         # 门户探测说 online，状态文件说 failed：页面显示是旧的，不该因此重新认证。
