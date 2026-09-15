@@ -155,6 +155,27 @@ pkg_installed() {
 	printf '%s\n' "$PKG_CACHE" | grep -qx "$1"
 }
 
+# 权限读数：busybox 不一定把 stat 编进来，而 GNU 的 `stat -c` 与 BSD 的 `stat -f`
+# 语法互不兼容，真机上两条都失败——权限检查会整段静默（case 的空分支），看起来像
+# 通过了。`ls -l` 在三种实现里第一字段都是同一个符号串，从它换算出八进制。
+file_mode() {
+	# 这里只读脚本自己写死的几个路径，不枚举目录，SC2012 的顾虑不适用。
+	# shellcheck disable=SC2012
+	LC_ALL=C ls -ld "$1" 2>/dev/null | awk '{
+		p = substr($1, 2)
+		if (length(p) < 9) exit
+		n = 0
+		for (i = 1; i <= 9; i += 3) {
+			v = 0
+			if (substr(p, i, 1) != "-") v += 4
+			if (substr(p, i + 1, 1) != "-") v += 2
+			if (substr(p, i + 2, 1) != "-") v += 1
+			n = n * 10 + v
+		}
+		print n
+	}'
+}
+
 # check_sysctl <key> <expected> <file-under-/etc/sysctl.d>
 check_sysctl() {
 	# 内核按点分名在 /proc/sys 下分层，net.ipv4.tcp_congestion_control 对应
@@ -387,15 +408,24 @@ group_services() {
 	fi
 
 	listen_snapshot
-	if printf '%s' "$LISTEN_CACHE" | grep -q '127\.0\.0\.1:6053'; then
-		ok 'SmartDNS 监听 127.0.0.1:6053'
-	elif printf '%s' "$LISTEN_CACHE" | grep -q '6053'; then
-		warn '6053 端口在监听，但没绑在回环地址上（bind_device 设置可能丢了）'
+	if printf '%s' "$LISTEN_CACHE" | grep -q '6053'; then
+		ok 'SmartDNS 在监听 6053'
 	else
-		trouble 'SmartDNS 没有监听 6053' "${ROOT}/etc/init.d/smartdns restart"
+		trouble 'SmartDNS 没有监听 6053（dnsmasq 的上游是 127.0.0.1#6053，解析会全断）' \
+			"${ROOT}/etc/init.d/smartdns restart"
 	fi
-	if printf '%s' "$LISTEN_CACHE" | grep -q '0\.0\.0\.0:6053'; then
-		warn 'SmartDNS 还监听着 0.0.0.0:6053，局域网里可直接查询（应只绑回环）'
+	# 限制入口靠的是 SO_BINDTODEVICE（bind_device + bind_device_name），不是监听地址：
+	# 开了设备绑定，netstat 里照样是通配地址。按监听地址判会把这份正确配置报成
+	# 「没绑回环」——真机上就是这么误报的。
+	sd_bind="$(uget smartdns.@smartdns[0].bind_device)"
+	sd_dev="$(uget smartdns.@smartdns[0].bind_device_name)"
+	if [ "$sd_bind" = 1 ] && [ "$sd_dev" = lo ]; then
+		ok 'SmartDNS 只收 lo 的查询（bind_device=1, bind_device_name=lo）'
+	elif printf '%s' "$LISTEN_CACHE" | grep -q '127\.0\.0\.1:6053'; then
+		ok 'SmartDNS 监听 127.0.0.1:6053'
+	else
+		trouble "SmartDNS 没绑回环（bind_device=${sd_bind:-未设} name=${sd_dev:-未设}），局域网可直接查 6053" \
+			"uci -q set smartdns.@smartdns[0].bind_device=1 && uci -q set smartdns.@smartdns[0].bind_device_name=lo && uci -q commit smartdns && ${ROOT}/etc/init.d/smartdns restart"
 	fi
 
 	if [ "$(uget p910nd.@p910nd[0].enabled)" = 1 ]; then
@@ -703,8 +733,12 @@ group_wireless() {
 	done
 
 	if command -v iwinfo >/dev/null 2>&1; then
-		for netdev in $(iwinfo 2>/dev/null | sed -n 's/^\([^ ]*\) .*/\1/p'); do
-			line="$(iwinfo "$netdev" info 2>/dev/null | sed -n 's/^ *Channel: \(.*\)$/\1/p' | head -n 1)"
+		# 首字符必须是非空格：iwinfo 的续行（`          Access Point: ...`）也以「一个
+		# 单词加空格」开头，按 ^[^ ]* 取会把 Access、Mode: 当成网卡名去调用。
+		for netdev in $(iwinfo 2>/dev/null | sed -n 's/^\([^ ][^ ]*\) .*/\1/p'); do
+			# iwinfo 把信道写在 Mode 行的中间（`Mode: Master  Channel: 36 (5.180 GHz)`），
+			# 不是行首，按 `^Channel:` 锚定的正则永远匹配不到。
+			line="$(iwinfo "$netdev" info 2>/dev/null | sed -n 's/.*Channel: \([0-9][0-9]*\).*/\1/p' | head -n 1)"
 			[ -n "$line" ] && info "运行态 ${netdev} 信道 ${line}"
 		done
 		clients="$(iwinfo 2>/dev/null | grep -c 'ESSID:')"
@@ -724,7 +758,7 @@ group_ruijie() {
 		fail '没有 /etc/config/ruijie（锐捷认证没有安装或配置被重置）'
 		return
 	fi
-	mode="$(stat -c %a "$cfg" 2>/dev/null || stat -f %Lp "$cfg" 2>/dev/null)"
+	mode="$(file_mode "$cfg")"
 	case "$mode" in
 		600) ok '/etc/config/ruijie 权限 0600' ;;
 		'') warn '读不到 /etc/config/ruijie 的权限' ;;
@@ -733,7 +767,7 @@ group_ruijie() {
 	for prog in ruijie-auth ruijie-password ruijie-refresh-query; do
 		path="${ROOT}/usr/libexec/$prog"
 		[ -f "$path" ] || { fail "缺少 /usr/libexec/${prog}"; continue; }
-		pmode="$(stat -c %a "$path" 2>/dev/null || stat -f %Lp "$path" 2>/dev/null)"
+		pmode="$(file_mode "$path")"
 		case "$pmode" in
 			755) ok "${prog} 权限 0755" ;;
 			'') ;;
@@ -741,13 +775,17 @@ group_ruijie() {
 		esac
 	done
 
+	# 没配置不等于配置错了。三个空字段各报一条 WARN 会把真正的故障淹掉，所以
+	# 合并成一条，并且下面跟密码、门户有关的判断都按「尚未配置」处理。
+	unset_keys=''
 	for key in username server query_string; do
-		if [ -z "$(uget "ruijie.main.${key}")" ]; then
-			warn "ruijie.main.${key} 是空的（还没在页面上配置）"
-		else
-			ok "ruijie.main.${key} 已配置"
-		fi
+		[ -n "$(uget "ruijie.main.${key}")" ] || unset_keys="${unset_keys} ${key}"
 	done
+	if [ -n "$unset_keys" ]; then
+		info "锐捷认证还没配置（缺${unset_keys}），下面按「尚未配置」处理"
+	else
+		ok 'ruijie.main 的 username/server/query_string 都已配置'
+	fi
 	if [ "$(uget ruijie.main.auto_reconnect)" = 1 ]; then
 		ok '断线自动重连已打开'
 	else
@@ -778,6 +816,8 @@ group_ruijie() {
 		trouble 'password_payload 是空的，但回退点还在（设置被写丢了，用回退点补回）' "$restore_from_prev"
 	elif [ -z "$payload" ] && [ "$has_original" = 1 ] && [ -n "$original" ]; then
 		trouble 'password_payload 是空的，但最初的密码锚点还在（设置被写丢了，用锚点补回）' "$restore_from_original"
+	elif [ -z "$payload" ] && [ -n "$unset_keys" ]; then
+		info '还没有锐捷密码（服务尚未配置，属正常）'
 	elif [ -z "$payload" ]; then
 		warn '还没有可用的锐捷密码（payload 与回退点都是空的）'
 	elif [ -n "$prev" ]; then
