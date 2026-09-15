@@ -385,15 +385,20 @@ group_services() {
 
 	# mwan3 的 service_running() 只看 /var/run/mwan3 目录在不在，重复安装或异常
 	# 退出会留下这个过期目录，导致 LuCI 与 mwan3 status 都显示成「在运行」。
+	# 这里 09-15 之前用的是 rmdir，而它一次也没成功过：真实的残留目录里必然有
+	# iface_state/、iptables_log/、mmx_mask 这些 mwan3 自己写的运行时状态，rmdir
+	# 只会报 Directory not empty 然后放弃——等于这个修复是摆设（09-15 在真机上
+	# 就是这么失败的）。目录里没有配置，配置在 /etc/config/mwan3；上面那个判断
+	# 又已经确认 mwan3 既没开机自启也没在跑，所以整个删掉是安全的。
 	if [ -d "${ROOT}/var/run/mwan3" ] && ! svc_enabled mwan3 && ! cmd_running '[/]usr/sbin/mwan3'; then
 		if [ "$MODE" = fix ]; then
-			if rmdir "${ROOT}/var/run/mwan3" 2>/dev/null; then
+			if rm -rf "${ROOT}/var/run/mwan3"; then
 				fixed '清掉了过期的 /var/run/mwan3 目录（它让 mwan3 看起来像在运行）'
 			else
-				warn '/var/run/mwan3 非空，没敢删；mwan3 status 会继续显示 tracking down'
+				warn '/var/run/mwan3 删不掉；mwan3 status 会继续显示 tracking down'
 			fi
 		else
-			fail '存在过期的 /var/run/mwan3，mwan3 会被误报成运行中（修复命令: rmdir /var/run/mwan3）'
+			fail '存在过期的 /var/run/mwan3，mwan3 会被误报成运行中（修复命令: rm -rf /var/run/mwan3）'
 		fi
 	fi
 
@@ -708,27 +713,31 @@ group_wireless() {
 			trouble "${radio} 国家码 ${country:-未设}，应为 ${country_default}" \
 				"uci -q set wireless.${radio}.country=${country_default} && uci -q commit wireless && wifi reload"
 		fi
-		info "${radio} 信道 ${channel:-auto} / ${htmode:-默认}"
+		info "${radio} 信道 ${channel:-auto} / 模式 ${htmode:-默认}"
 
-		# 2026-09-14 按实测扫描选的台：2.4G ch6 的同频干扰比 ch1 低约 6 倍，
-		# 5G ch36 所在块是最干净的非 DFS 块。默认只报告，--fix-wifi 才改。
+		# 2026-09-15 起这里只管 htmode，信道一个字都不写。09-14 曾按一次扫描把
+		# 2.4G 定成 ch6（理由「同频干扰比 ch1 低 6 倍」），09-15 三次复扫得到相反
+		# 结论：ch5 上一台 -45 dBm 的 SCAUNET_1x 把 ch6 压到 -44 dBm，ch1 有
+		# -66 dBm，差 20 dB。射频环境会变，而写死的信道在环境变了以后不会自己
+		# 纠正，只会把用户从好信道推到坏信道上——「优选信道」必须是现场扫描的
+		# 结论，不能是别人昨天量出来的常量。htmode 不是同一类东西：HT20/VHT80
+		# 是网卡能力问题，跟邻居无关，所以照旧强制。
 		case "$band" in
-			2g) want_channel=6; want_htmode=HT20 ;;
-			5g) want_channel=36; want_htmode=VHT80 ;;
+			2g) want_htmode=HT20 ;;
+			5g) want_htmode=VHT80 ;;
 			*) continue ;;
 		esac
-		if [ "$channel" = "$want_channel" ] && [ "$htmode" = "$want_htmode" ]; then
-			ok "${radio} 用的是实测选台 ch${want_channel}/${want_htmode}"
+		if [ "$htmode" = "$want_htmode" ]; then
+			ok "${radio} 无线模式 ${want_htmode}"
 		elif [ "$FIX_WIFI" = 1 ]; then
-			uci -q set "wireless.${radio}.channel=${want_channel}"
 			uci -q set "wireless.${radio}.htmode=${want_htmode}"
 			if uci -q commit wireless >/dev/null 2>&1; then
-				fixed "${radio} 改回 ch${want_channel}/${want_htmode}（需 wifi reload 才生效）"
+				fixed "${radio} 模式改回 ${want_htmode}（需 wifi reload 才生效）"
 			else
-				fail "${radio} 改回 ch${want_channel}/${want_htmode} 失败"
+				fail "${radio} 模式改回 ${want_htmode} 失败"
 			fi
 		else
-			warn "${radio} 现在 ${channel:-auto}/${htmode:-默认}，实测选台是 ch${want_channel}/${want_htmode}（要改加 --fix-wifi）"
+			warn "${radio} 模式是 ${htmode:-默认}，应为 ${want_htmode}（要改加 --fix-wifi）"
 		fi
 	done
 
