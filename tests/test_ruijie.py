@@ -15,6 +15,7 @@ import urllib.parse
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'package/ruijie-auth/files/usr/libexec/ruijie-auth'
 PASSWORD_SCRIPT = Path(__file__).resolve().parents[1] / 'package/ruijie-auth/files/usr/libexec/ruijie-password'
+REFRESH_SCRIPT = Path(__file__).resolve().parents[1] / 'package/ruijie-auth/files/usr/libexec/ruijie-refresh-query'
 
 class Handler(http.server.BaseHTTPRequestHandler):
     code = 204
@@ -629,6 +630,192 @@ class PasswordRollbackTests(unittest.TestCase):
         result = self.run_pw('revert', '--original')
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('最初密码是空的', result.stdout)
+
+
+class RefreshQueryTests(unittest.TestCase):
+    """ruijie-refresh-query 抓到 query 时必须把同一个 Location 的 origin 一起写成 server。
+
+    刷机重建 rootfs_data 之后 server 和 query_string 一起回到空值，而 ruijie-auth
+    没有 server 就连请求都不发；两者又都是门户按收到请求的地址加密的，只能在路由器
+    上现抓——所以它们是同一份 302 的两半，写入与回滚都得成对。这里用桩件替掉
+    uci/ubus/curl/logger 和它调用的 ruijie-auth，真在跑的是脚本自己的分支：探测、
+    门户判据、写 UCI、失败回滚。
+    """
+
+    QUERY = 'wlanuserip=8A3F21&wlanacname=SCAU&mac=77C1E0&t=1757890000'
+    # 旧值刻意非空且与抓到的不同：这样「server 被改写成门户地址」才是被证明的，
+    # 而不是撞上一个原本就空着的字段。
+    OLD_QUERY = 'wlanuserip=OLD&mac=OLD'
+    OLD_SERVER = 'http://10.0.0.9'
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.dir = Path(self.temp.name)
+        self.state_file = self.dir / 'uci-state.json'
+        self.seen_file = self.dir / 'seen-by-auth.json'
+        self.location = self.dir / 'location'
+        self.auth_rc = self.dir / 'auth-rc'
+
+        # 设备上的绝对路径在沙箱里都要有对应物：state 文件、以及 reauth 调的那个
+        # ruijie-auth。
+        self.script = self.dir / 'refresh'
+        self.script.write_text(
+            REFRESH_SCRIPT.read_text(encoding='utf-8')
+            .replace('/usr/libexec/ruijie-auth', str(self.dir / 'auth'))
+            .replace('/tmp/ruijie-auth', str(self.dir / 'ruijie-auth'))
+        )
+
+        # 状态型的 uci 桩：get 对不存在的选项退出 1（真 uci 就是这样，脚本靠这个
+        # 区分「没写过」和「写成空」），set 落盘，commit 无所谓——回滚是否真的把值
+        # 写回去了，要看得到才行。
+        (self.dir / 'uci').write_text(
+            '#!/usr/bin/env python3\n'
+            'import json, os, sys\n'
+            'path = ' + repr(str(self.state_file)) + '\n'
+            'state = json.load(open(path)) if os.path.exists(path) else {}\n'
+            'args = [a for a in sys.argv[1:] if a != "-q"]\n'
+            'if args and args[0] == "get":\n'
+            '    key = args[1].rsplit(".", 1)[-1]\n'
+            '    if key not in state:\n'
+            '        sys.exit(1)\n'
+            '    print(state[key])\n'
+            'elif args and args[0] == "set":\n'
+            '    key, _, value = args[1].partition("=")\n'
+            '    state[key.rsplit(".", 1)[-1]] = value\n'
+            '    json.dump(state, open(path, "w"))\n'
+        )
+        (self.dir / 'ubus').write_text(
+            '#!/usr/bin/env python3\n'
+            'import json\n'
+            'print(json.dumps({"up": True, "l3_device": "eth0.2",\n'
+            '                  "ipv4-address": [{"address": "172.16.67.126"}]}))\n'
+        )
+        (self.dir / 'jsonfilter').write_text(
+            '#!/usr/bin/env python3\n'
+            'import json,sys\n'
+            'with open(sys.argv[sys.argv.index("-i")+1]) if "-i" in sys.argv else sys.stdin as stream:\n'
+            '    data=json.load(stream)\n'
+            'expr=sys.argv[sys.argv.index("-e")+1]\n'
+            'if expr == "@.up": print(str(data.get("up", False)).lower())\n'
+            'elif expr == \'@["ipv4-address"][0].address\': print(next(iter(data.get("ipv4-address", [])), {}).get("address", ""))\n'
+            'elif expr == "@.l3_device": print(data.get("l3_device", ""))\n'
+            'elif expr == "@.result": print(data.get("result", ""))\n'
+        )
+        (self.dir / 'logger').write_text('#!/bin/sh\nexit 0\n')
+        # 探针打的三个地址在夹具里不重要，重要的是 Location 这个头——没有它就是
+        # 「没被拦」，脚本应当拒绝往下走。
+        (self.dir / 'curl').write_text(
+            '#!/usr/bin/env python3\n'
+            'import pathlib, sys\n'
+            'spec = pathlib.Path(' + repr(str(self.location)) + ')\n'
+            'if not spec.exists():\n'
+            '    sys.exit(7)\n'
+            'print("HTTP/1.1 302 Found")\n'
+            'print("Location: " + spec.read_text())\n'
+        )
+        # reauth 一进来就把当时的 UCI 抄一份：回滚之后旧值回来了，光看结果分不出
+        # 「写过又回滚」和「根本没写」，那一份在认证发起时刻的配置才是证据。
+        (self.dir / 'auth').write_text(
+            '#!/usr/bin/env python3\n'
+            'import pathlib, shutil, sys\n'
+            'shutil.copyfile(' + repr(str(self.state_file)) + ', ' + repr(str(self.seen_file)) + ')\n'
+            'sys.exit(int(pathlib.Path(' + repr(str(self.auth_rc)) + ').read_text().strip()))\n'
+        )
+        for name in ('uci', 'ubus', 'jsonfilter', 'logger', 'curl', 'auth'):
+            (self.dir / name).chmod(0o755)
+
+        self.env = dict(os.environ, PATH=str(self.dir) + os.pathsep + os.environ['PATH'])
+        self.write_state(wan_interface='wan', interface='',
+                         server=self.OLD_SERVER, query_string=self.OLD_QUERY)
+        self.set_auth_rc(0)
+
+    # ---- 夹具
+
+    def write_state(self, **values):
+        self.state_file.write_text(json.dumps(values), encoding='utf-8')
+
+    def read_state(self):
+        return json.loads(self.state_file.read_text(encoding='utf-8'))
+
+    def seen_by_auth(self):
+        return json.loads(self.seen_file.read_text(encoding='utf-8'))
+
+    def set_redirect(self, location):
+        self.location.write_text(location, encoding='utf-8')
+
+    def set_auth_rc(self, rc):
+        self.auth_rc.write_text(str(rc), encoding='utf-8')
+
+    def run_refresh(self, *args):
+        # 脚本打印中文（旧 query / 门户地址），解码按 UTF-8 显式指定，不靠
+        # runner 恰好是什么 locale。
+        return subprocess.run(['sh', str(self.script)] + list(args), env=self.env,
+                              text=True, encoding='utf-8', capture_output=True, timeout=30)
+
+    # ---- 用例
+
+    def test_the_portal_origin_is_written_as_the_server(self):
+        self.set_redirect('http://172.16.0.1/eportal/index.jsp?' + self.QUERY)
+        result = self.run_refresh()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        state = self.read_state()
+        self.assertEqual(state['query_string'], self.QUERY)
+        self.assertEqual(state['server'], 'http://172.16.0.1')
+        # 门户地址不是秘密，抓到就该看得见（query 照旧只打值）。
+        self.assertIn('http://172.16.0.1', result.stdout)
+
+    def test_an_explicit_port_survives_in_the_origin(self):
+        self.set_redirect('http://172.16.0.1:8080/eportal/index.jsp?' + self.QUERY)
+        self.assertEqual(self.run_refresh().returncode, 0)
+        self.assertEqual(self.read_state()['server'], 'http://172.16.0.1:8080')
+
+    def test_an_https_origin_keeps_its_scheme(self):
+        self.set_redirect('https://portal.scau.edu.cn/eportal/index.jsp?' + self.QUERY)
+        self.assertEqual(self.run_refresh().returncode, 0)
+        self.assertEqual(self.read_state()['server'], 'https://portal.scau.edu.cn')
+
+    def test_a_redirect_that_is_not_a_portal_page_leaves_the_server_alone(self):
+        # 透明代理和上级网关也会 302，拿它们的 origin 当 server 会把认证发到一台
+        # 不认识这台机器的服务器上。判据只认 index.jsp，这里顺带钉住旧值不动。
+        self.set_redirect('http://192.168.1.1/login.html')
+        result = self.run_refresh()
+        self.assertNotEqual(result.returncode, 0)
+        state = self.read_state()
+        self.assertEqual(state['server'], self.OLD_SERVER)
+        self.assertEqual(state['query_string'], self.OLD_QUERY)
+
+    def test_capture_only_stores_the_origin_too(self):
+        # capture 不登录，但门户地址是「抓」的一部分：不然抓完还要人再填一次，
+        # 而那正是刷机后认证发不出去的原因。
+        self.set_redirect('http://172.16.0.1/eportal/index.jsp?' + self.QUERY)
+        result = self.run_refresh('capture')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.read_state()['server'], 'http://172.16.0.1')
+
+    def test_a_failed_reauth_rolls_the_server_back_with_the_query(self):
+        self.set_redirect('http://172.16.0.1:8080/eportal/index.jsp?' + self.QUERY)
+        self.set_auth_rc(1)
+        result = self.run_refresh()
+        self.assertNotEqual(result.returncode, 0)
+        # 发出去认证的必须是这一对：新串配新门户。
+        self.assertEqual(self.seen_by_auth()['query_string'], self.QUERY)
+        self.assertEqual(self.seen_by_auth()['server'], 'http://172.16.0.1:8080')
+        # 被门户拒了之后两个字段一起回到旧值，不能只回滚一半。
+        state = self.read_state()
+        self.assertEqual(state['query_string'], self.OLD_QUERY)
+        self.assertEqual(state['server'], self.OLD_SERVER)
+
+    def test_the_rollback_puts_back_a_server_that_was_empty(self):
+        # 刚刷完机就是这样：server 空着。回滚只把 query 放回去的话，留下的是
+        # 「旧串 + 只认新串的门户」，比什么都不做更糟。
+        self.write_state(wan_interface='wan', interface='',
+                         server='', query_string=self.OLD_QUERY)
+        self.set_redirect('http://172.16.0.1/eportal/index.jsp?' + self.QUERY)
+        self.set_auth_rc(1)
+        self.assertNotEqual(self.run_refresh().returncode, 0)
+        self.assertEqual(self.seen_by_auth()['server'], 'http://172.16.0.1')
+        self.assertEqual(self.read_state()['server'], '')
 
 
 class ShellHygieneTests(unittest.TestCase):
