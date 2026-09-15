@@ -483,9 +483,54 @@ Wi-Fi 密码只报告不修改，2.4G/5G 选台要 `--fix-wifi`，门户重新�
 任何模式下都不打印密码明文，掩码规则与 `ruijie-password` 保持一致（位数 + 末两位）。
 `fix` 的每一项都是幂等的，修完再跑一次 `check` 应当干净无 FAIL。
 
-`tests/test_doctor.py` 用假根目录加假 `PATH` 覆盖它，18 项。其中两条是这套东西能用
+`tests/test_doctor.py` 用假根目录加假 `PATH` 覆盖它，22 项。其中两条是这套东西能用
 的前提：一条逐字节比对 `check` 前后的整棵假根目录，证明只读模式真的什么都没动；一条
 在 `fix` 之后再跑一次 `check`，证明修复收敛而不是每次都报同一批问题。另外一组同步
 测试把脚本里的常量钉死在仓库事实上——服务开关列表对 `90-acrh17`、TurboACC 的键对
 `patch-turboacc-runtime.py`、日志字符串对运行时补丁、DNS 条目对 `uci-defaults`、
 keep.d 条目对 `files/lib/upgrade/keep.d/acrh17`，上游改了而这里没跟着改就会直接变红。
+
+## 2026-09-15 校园网上线（无外网状态下修复）
+
+刷机重建 `rootfs_data`，`/etc/config/ruijie` 回到出厂默认：没有门户地址、没有学号、
+没有密码，服务是关的。WAN 照样能从校园网领到 IPv4，但那只是个校园内网地址，没通过
+ePortal 认证就出不了网——「路由器连不上网」就是这个样子。此时路由器没有外网，`opkg`
+和下载都谈不上，修复只能靠设备上已有的东西完成。
+
+`scripts/acrh17-campus-up.sh` 和 doctor 一样是一份自包含脚本、两种跑法，只用到
+`curl`、`ubus`、`jsonfilter`、`uci`：
+
+```sh
+# 从开发机（ssh 只自动尝试 id_rsa/id_ecdsa/id_ed25519，这台路由器的钥匙不在其中）
+./scripts/acrh17-campus-up.sh --host root@192.168.5.1 --ssh-key ~/.ssh/id_acrh17 \
+    --user 2021xxxxxxxx
+ssh root@192.168.5.1 'sh -s' < scripts/acrh17-campus-up.sh        # 或直接送进去跑
+```
+
+它能自己算出来的只有门户地址。未认证时校园网把 HTTP 302 到登录页，那个 `Location`
+里同时带着门户 origin 和本次链路的 query_string：`origin` 就是 `server`，路径与查询串
+分别由 `login_path` 和 `query_string` 承担。两者都绑在收到它的地址与 MAC 上，换台机器
+抄过来没用、链路一变就失效，所以只能在路由器上现场抓。此前 `ruijie-refresh-query`
+已经会从同一个 302 抓 query_string，但没人把 origin 存下来，`server` 一直靠人手填——
+这就是唯一的缺口。
+
+于是 `fix` 做它做得了的三件事：写入推导出的门户地址、抓取并校验 query_string、
+写入学号（`--user`），凭据齐了再打开 `ruijie.main.enabled`、补 `rc.d` 自启链接、
+登录并验证。探针刻意从认证要走的设备出去（`--interface`），因为门户把 query_string
+绑在收到请求的地址上，多 WAN 的机器走默认路由会抓回一条属于另一条链路的串，把还能
+用的那条覆盖掉。重定向只有落在 `index.jsp` 上才被当作门户：透明代理和上级网关也会
+302，拿它们的 origin 当 `server` 会把认证发到一台不认识这台机器的服务器上。
+
+密码始终不经过这个脚本。`ruijie-password set` 会拿密码做一次真实登录、被门户拒绝时
+自动回退，而它要求 `server` 与 `username` 已经在配置里——否则请求根本发不出去，
+`last_reason` 判成 `unknown`，密码写入却没有被验证。所以顺序是先跑本脚本的 `fix`，
+再 `ruijie-password set '<密码>'`，最后再跑一次 `fix` 把服务打开；缺凭据时脚本会自己
+把这三步打出来。登录排在起守护进程之前也是同一个道理：守护进程只在真正发请求时拿
+认证锁，先起服务会和这次登录抢锁，把一次本来能成的登录变成退出码 75。
+
+`tests/test_campus_up.py` 37 项，夹具补上了 doctor 那份没有的几样东西：一份会说
+`Location` 的 `curl`、一个真会按路径取值（而不是永远返回空）的 `jsonfilter`、一个
+能表态在线与否的 `ruijie-auth`。桩的日志全部落在假根目录之外，所以「`check` 一个
+字节都没动」这条断言不会把自己的日志当成脏改动。六个关键判据做了反事实验证——
+去掉门户页判据、去掉 `--interface`、把登录挪到起服务之后、把 75 当成失败、允许没有
+密码就开服务、放行缺 `mac` 的 query，对应的用例都会变红。
