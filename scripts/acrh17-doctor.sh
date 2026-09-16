@@ -6,6 +6,9 @@
 #   ./scripts/acrh17-doctor.sh fix --host root@192.168.5.1    检测并把安全项修回去
 #   ssh root@192.168.5.1 'sh -s' < scripts/acrh17-doctor.sh   直接在路由器上跑
 #
+# --host 模式的私钥用 --ssh-key 指定：ssh 只自动尝试 id_rsa/id_ecdsa/id_ed25519 这几个
+# 默认名字，这台路由器的钥匙不在其中，钥匙不叫默认名时就得自己给。
+#
 # check 只读。fix 只做幂等、非破坏性的改动：把被 sysupgrade 重置的服务开关重新
 # 关掉、恢复 UA3F/mwan3 存在时不允许的 TurboACC 卸载、修回文件权限、把锐捷密码
 # 状态机里「值丢失」的两种状态补回去。两个默认关闭的开关用于会动到用户可见设置
@@ -26,6 +29,7 @@ FIX_AUTH="${ACRH17_DOCTOR_FIX_AUTH:-0}"
 EXPECT_STAMP="${ACRH17_DOCTOR_EXPECT_STAMP:-}"
 ROOT="${ACRH17_DOCTOR_ROOT:-}"
 HOST=''
+SSH_KEY="${ACRH17_SSH_KEY:-}"
 
 usage() {
 	cat <<'EOF'
@@ -34,6 +38,7 @@ usage() {
   check                只读检测（默认）
   fix                  检测并修复安全项（见脚本头部说明）
   --host [user@]地址   从开发机远程执行；把本脚本通过 ssh 送到路由器上运行
+  --ssh-key 路径       远程模式用的私钥；ssh 只会自动尝试 id_rsa/id_ecdsa/id_ed25519
   --expect-stamp 值    期望的固件版本戳（YYYYMMDD-HHMM），不匹配时报错
   --fix-wifi           重设 2.4G ch6/HT20 与 5G ch36/VHT80
   --fix-auth           探测确认离线时执行一次 reauth
@@ -48,6 +53,8 @@ while [ $# -gt 0 ]; do
 		check|fix) MODE="$arg" ;;
 		--host) HOST="${1:-}"; [ $# -gt 0 ] && shift ;;
 		--host=*) HOST="${arg#--host=}" ;;
+		--ssh-key) SSH_KEY="${1:-}"; [ $# -gt 0 ] && shift ;;
+		--ssh-key=*) SSH_KEY="${arg#--ssh-key=}" ;;
 		--expect-stamp) EXPECT_STAMP="${1:-}"; [ $# -gt 0 ] && shift ;;
 		--expect-stamp=*) EXPECT_STAMP="${arg#--expect-stamp=}" ;;
 		--fix-wifi) FIX_WIFI=1 ;;
@@ -62,7 +69,11 @@ if [ -n "$HOST" ]; then
 		echo '远程模式需要以脚本文件方式运行，例如 ./scripts/acrh17-doctor.sh --host root@192.168.5.1' >&2
 		exit 2
 	fi
-	exec ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new "$HOST" \
+	# IdentitiesOnly 是跟着 -i 一起来的：不限制的话 agent 会把它持有的每一把钥匙
+	# 都递一遍，在路由器那种 MaxAuthTries 很小的地方还没轮到指定这把就断开了。
+	set --
+	[ -z "$SSH_KEY" ] || set -- -i "$SSH_KEY" -o IdentitiesOnly=yes
+	exec ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new "$@" "$HOST" \
 		"ACRH17_DOCTOR_MODE=${MODE} ACRH17_DOCTOR_FIX_WIFI=${FIX_WIFI} ACRH17_DOCTOR_FIX_AUTH=${FIX_AUTH} ACRH17_DOCTOR_EXPECT_STAMP='${EXPECT_STAMP}' sh -s" < "$0"
 fi
 

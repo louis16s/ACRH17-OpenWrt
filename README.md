@@ -464,7 +464,9 @@ ch13（-53）之间、两侧各压掉一半带宽。**这个结论在第二天�
 一个脚本，两种跑法，内容完全相同：
 
 ```sh
-./scripts/acrh17-doctor.sh --host root@192.168.5.1        # 从开发机 ssh 送过去跑
+# ssh 只自动尝试 id_rsa/id_ecdsa/id_ed25519，这台路由器的钥匙不在其中，所以两种
+# 远程脚本都要带 --ssh-key
+./scripts/acrh17-doctor.sh --host root@192.168.5.1 --ssh-key ~/.ssh/id_acrh17
 ssh root@192.168.5.1 'sh -s' < scripts/acrh17-doctor.sh   # 或直接在路由器上跑
 ```
 
@@ -485,9 +487,11 @@ Wi-Fi 密码和 2.4G/5G 信道只报告不修改，无线模式（HT20/VHT80）�
 任何模式下都不打印密码明文，掩码规则与 `ruijie-password` 保持一致（位数 + 末两位）。
 `fix` 的每一项都是幂等的，修完再跑一次 `check` 应当干净无 FAIL。
 
-`tests/test_doctor.py` 用假根目录加假 `PATH` 覆盖它，23 项。其中两条是这套东西能用
+`tests/test_doctor.py` 用假根目录加假 `PATH` 覆盖它，28 项。其中两条是这套东西能用
 的前提：一条逐字节比对 `check` 前后的整棵假根目录，证明只读模式真的什么都没动；一条
-在 `fix` 之后再跑一次 `check`，证明修复收敛而不是每次都报同一批问题。另外一组同步
+在 `fix` 之后再跑一次 `check`，证明修复收敛而不是每次都报同一批问题。远程模式另占
+一组：假 `PATH` 上放一个只记账的 `ssh`，用它验证 `--ssh-key` 确实变成了 `-i` 加
+`IdentitiesOnly`，以及不带钥匙时这两个参数真的不出现。另外一组同步
 测试把脚本里的常量钉死在仓库事实上——服务开关列表对 `90-acrh17`、TurboACC 的键对
 `patch-turboacc-runtime.py`、日志字符串对运行时补丁、DNS 条目对 `uci-defaults`、
 keep.d 条目对 `files/lib/upgrade/keep.d/acrh17`，上游改了而这里没跟着改就会直接变红。
