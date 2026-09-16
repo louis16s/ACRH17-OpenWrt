@@ -64,6 +64,12 @@ while [ $# -gt 0 ]; do
 	esac
 done
 
+# 这个值原样嵌进 ssh 的远程命令串，单引号会破坏引号配对，把剩余部分变成路由器上
+# 的又一条命令。MODE/FIX_WIFI/FIX_AUTH 都出自固定取值，只有 --expect-stamp 是自由文本。
+case "${EXPECT_STAMP}" in
+	*"'"*) echo '参数里不能有单引号。' >&2; exit 2;;
+esac
+
 if [ -n "$HOST" ]; then
 	if [ ! -f "$0" ]; then
 		echo '远程模式需要以脚本文件方式运行，例如 ./scripts/acrh17-doctor.sh --host root@192.168.5.1' >&2
