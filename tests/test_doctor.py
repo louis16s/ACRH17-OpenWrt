@@ -681,6 +681,14 @@ class RemoteModeTests(unittest.TestCase):
         self.run_remote(root=self.base / 'does-not-exist')
         self.assertIn('root@192.168.5.1', self.ssh_call())
 
+    def test_a_quote_in_the_expected_stamp_is_refused(self):
+        # 单引号会冲破远程命令串的引号配对，把后半截变成路由器上的另一条命令：
+        # 不加守卫时 ACRH17_DOCTOR_EXPECT_STAMP='2026'; id; echo '' sh -s 就发出去了。
+        result = self.run_remote('--expect-stamp', "2026'; id; echo '")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('单引号', result.stderr)
+        self.assertEqual(self.calls.read_text(encoding='utf-8'), '')
+
 
 class DoctorSyncTests(unittest.TestCase):
     """The doctor's expectations must be the shipped defaults, not a copy that
