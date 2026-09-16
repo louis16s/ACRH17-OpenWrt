@@ -614,6 +614,74 @@ class RepairTests(DoctorTestCase):
         self.assertIn('已执行一次重新认证', out)
 
 
+class RemoteModeTests(unittest.TestCase):
+    """--host 把脚本经 ssh 送过去跑；这条路径不走假根目录，走的是 ssh 本身。"""
+
+    def setUp(self):
+        self.base = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.base, ignore_errors=True)
+        self.bin = self.base / 'bin'
+        self.bin.mkdir()
+        self.calls = self.base / 'calls.log'
+        self.calls.write_text('', encoding='utf-8')
+        # 一个只记账的 ssh：它必须把 stdin 上的脚本读掉，否则上游会看到 EPIPE。
+        ssh = self.bin / 'ssh'
+        ssh.write_text('#!/bin/sh\n'
+                       f'echo "ssh $*" >> {self.calls}\n'
+                       'cat > /dev/null\n'
+                       'exit 0\n', encoding='utf-8')
+        ssh.chmod(0o755)
+
+    def ssh_call(self):
+        # 一次运行只有一条 ssh 记录，整段读取而不是按行读。
+        text = self.calls.read_text(encoding='utf-8')
+        self.assertTrue(text.startswith('ssh '), text)
+        return text.rstrip('\n')
+
+    def run_remote(self, *args, root=None):
+        env = dict(os.environ)
+        env['PATH'] = str(self.bin) + os.pathsep + env['PATH']
+        # 远程模式在看见假根目录之前就 exec 掉了，这里默认不给 ROOT。
+        env.pop('ACRH17_DOCTOR_ROOT', None)
+        if root is not None:
+            env['ACRH17_DOCTOR_ROOT'] = str(root)
+        return subprocess.run(['sh', str(DOCTOR), '--host', 'root@192.168.5.1', *args],
+                              env=env, text=True, capture_output=True)
+
+    def test_key_is_passed_with_identities_only(self):
+        self.run_remote('--ssh-key', '/keys/id_acrh17')
+        call = self.ssh_call()
+        self.assertIn('-i /keys/id_acrh17', call)
+        # 不限制身份的话 agent 会挨个试手里的钥匙，可能在轮到这个之前就断开。
+        self.assertIn('-o IdentitiesOnly=yes', call)
+        self.assertIn('root@192.168.5.1', call)
+
+    def test_key_also_accepts_the_equals_form(self):
+        self.run_remote('--ssh-key=/keys/other')
+        self.assertIn('-i /keys/other', self.ssh_call())
+
+    def test_without_a_key_the_argument_is_absent(self):
+        self.run_remote()
+        call = self.ssh_call()
+        self.assertNotIn('-i ', call)
+        self.assertNotIn('IdentitiesOnly', call)
+
+    def test_mode_and_flags_are_carried_into_the_remote_command(self):
+        self.run_remote('fix', '--fix-wifi', '--fix-auth',
+                        '--expect-stamp', '20260915-2227', '--ssh-key', '/keys/k')
+        call = self.ssh_call()
+        self.assertIn('ACRH17_DOCTOR_MODE=fix', call)
+        self.assertIn('ACRH17_DOCTOR_FIX_WIFI=1', call)
+        self.assertIn('ACRH17_DOCTOR_FIX_AUTH=1', call)
+        self.assertIn("ACRH17_DOCTOR_EXPECT_STAMP='20260915-2227'", call)
+        self.assertIn('sh -s', call)
+
+    def test_remote_mode_wins_over_a_fake_root(self):
+        # --host 分支排在假根目录检查之前，两者同时给定时不该去看那个目录。
+        self.run_remote(root=self.base / 'does-not-exist')
+        self.assertIn('root@192.168.5.1', self.ssh_call())
+
+
 class DoctorSyncTests(unittest.TestCase):
     """The doctor's expectations must be the shipped defaults, not a copy that
     drifts away from them."""
