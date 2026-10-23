@@ -1,0 +1,254 @@
+/* UU 页面样式。
+ *
+ * 页面有三块表面：状态面板（dashboard.htm）、日志抽屉（logs.htm）以及包住它们的
+ * CBI section。全部限定在 #cbi-uuplugin 之下，不外溢到 LuCI 其它页面；选择器用
+ * class 而不是 id，因为同一个 config/section 对会被 CBI 渲染成多个 section，
+ * 它们的 id 都是 cbi-uuplugin-main。
+ *
+ * 两套配色是刻意的。状态面板两种主题下都保持深色，它是页面上唯一要跳出来的
+ * 元素；其余部分跟随主题 —— argon 在 dark.css 里用 !important 重定义了
+ * --bg-light/--bg-gray，因此表面色读 --bg-light 就能自动跟着主题走，边框和底纹
+ * 用中间灰，在深色和浅色底上都读得清，文字颜色一律不写死。
+ */
+
+#cbi-uuplugin {
+	/* 面板：固定深色 */
+	--uu-hero-bg: #0d1a16;
+	--uu-hero-panel: rgba(20, 41, 35, .88);
+	--uu-hero-text: #f0f7f4;
+	--uu-hero-muted: #9db8ad;
+	--uu-hero-accent: #4fd89e;
+	--uu-hero-line: rgba(148, 163, 184, .22);
+
+	/* 其余部分跟随主题 */
+	--uu-surface: var(--bg-light, #fff);
+	--uu-muted: var(--gray, #8898aa);
+	--uu-line: rgba(136, 152, 170, .34);
+	--uu-tint: rgba(136, 152, 170, .12);
+	--uu-shadow: 0 1px 2px rgba(23, 43, 77, .06);
+
+	--uu-radius: 16px;
+	--uu-gap: 1rem;
+}
+
+/* ---------------------------------------------------------------- 面板 -- */
+
+.uu-dashboard {
+	margin: 1rem 0 1.25rem;
+	overflow: hidden;
+	border: 1px solid var(--uu-line);
+	border-radius: var(--uu-radius);
+	background: radial-gradient(circle at 90% -20%, rgba(48, 190, 132, .3), transparent 44%), var(--uu-hero-bg);
+	color: var(--uu-hero-text);
+	box-shadow: 0 12px 30px rgba(5, 27, 20, .24);
+}
+
+.uu-hero {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--uu-gap);
+	padding: 1.35rem 1.5rem 1.2rem;
+}
+
+.uu-hero h3 {
+	margin: 0;
+	border: 0;
+	background: transparent;
+	color: var(--uu-hero-text);
+	font-size: 1.25rem;
+	font-weight: 650;
+}
+
+.uu-hero p {
+	margin: .35rem 0 0;
+	color: var(--uu-hero-muted);
+	font-size: .78rem;
+}
+
+.uu-pill {
+	display: inline-flex;
+	align-items: center;
+	gap: .5rem;
+	padding: .45rem .8rem;
+	border: 1px solid var(--uu-hero-line);
+	border-radius: 999px;
+	background: rgba(255, 255, 255, .06);
+	font-size: .82rem;
+	font-weight: 600;
+	white-space: nowrap;
+}
+
+.uu-pill i {
+	width: .52rem;
+	height: .52rem;
+	border-radius: 50%;
+	background: #93a4b8;
+}
+
+.uu-pill.online i { background: #48d597; box-shadow: 0 0 0 4px rgba(72, 213, 151, .15); }
+.uu-pill.working i { background: #f8c45b; box-shadow: 0 0 0 4px rgba(248, 196, 91, .14); }
+.uu-pill.offline i { background: #ff7b87; box-shadow: 0 0 0 4px rgba(255, 123, 135, .13); }
+
+.uu-cards {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 1px;
+	border-top: 1px solid var(--uu-hero-line);
+	border-bottom: 1px solid var(--uu-hero-line);
+	background: var(--uu-hero-line);
+}
+
+.uu-card {
+	min-height: 78px;
+	padding: 1rem 1.25rem;
+	background: var(--uu-hero-panel);
+}
+
+.uu-card span,
+.uu-card small {
+	display: block;
+	color: var(--uu-hero-muted);
+	font-size: .78rem;
+}
+
+.uu-card strong {
+	display: block;
+	margin: .28rem 0 .18rem;
+	overflow: hidden;
+	color: var(--uu-hero-text);
+	font-size: 1rem;
+	font-weight: 650;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.uu-summary {
+	display: grid;
+	grid-template-columns: 4rem minmax(0, 1fr);
+	gap: 1rem;
+	padding: 1rem 1.25rem;
+	background: rgba(4, 20, 15, .34);
+}
+
+.uu-summary b { color: var(--uu-hero-accent); font-size: .8rem; }
+.uu-summary span { overflow-wrap: anywhere; color: #c3d8cd; font-size: .84rem; }
+
+/* ---------------------------------------------------------- CBI 区块 -- */
+
+#cbi-uuplugin .cbi-section {
+	margin-bottom: 1rem;
+	padding: 1.15rem 1.25rem 1.2rem;
+	border: 1px solid var(--uu-line);
+	border-radius: 14px;
+	background: var(--uu-surface);
+	box-shadow: var(--uu-shadow);
+}
+
+#cbi-uuplugin .cbi-section > h3 {
+	margin: 0 0 .35rem;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: inherit;
+	font-size: .98rem;
+	font-weight: 650;
+}
+
+#cbi-uuplugin .cbi-section-descr {
+	/* 说明文字铺满宽屏就难读了 */
+	max-width: 60rem;
+	margin-bottom: .85rem;
+	color: var(--uu-muted);
+	font-size: .8rem;
+}
+
+#cbi-uuplugin .cbi-section > .cbi-section-node { padding: 0; }
+
+/* 全是按钮的区块就是一条工具条：CBI 每个按钮渲染成一个 .cbi-value，主题把
+ * .cbi-section-node 排成一列，这里改成可换行的一行。用 :has() 而不是脚本注入
+ * class，脚本没跑时按钮也不会退化成一列。 */
+#cbi-uuplugin .cbi-section:has(> .cbi-section-node > .cbi-value > .btn) > .cbi-section-node,
+#cbi-uuplugin .cbi-section:has(> .cbi-section-node > .btn) > .cbi-section-node {
+	display: flex;
+	flex-wrap: wrap;
+	gap: .55rem;
+}
+
+#cbi-uuplugin .cbi-section:has(> .cbi-section-node > .cbi-value > .btn) > .cbi-section-node > .cbi-value {
+	flex: 1 1 9.5rem;
+	max-width: 14rem;
+	margin: 0;
+	padding: 0;
+	border: 0;
+	background: none;
+}
+
+#cbi-uuplugin .cbi-section:has(> .cbi-section-node > .btn) > .cbi-section-node > .btn {
+	flex: 1 1 9.5rem;
+	max-width: 14rem;
+}
+
+#cbi-uuplugin .cbi-section:has(> .cbi-section-node > .cbi-value > .btn) .btn,
+#cbi-uuplugin .cbi-section:has(> .cbi-section-node > .btn) .btn {
+	width: 100%;
+	min-height: 2.55rem;
+	border-radius: 10px;
+	font-weight: 600;
+}
+
+/* ------------------------------------------------------------ 日志块 -- */
+
+.uu-logs {
+	margin: 0 0 1.25rem;
+	overflow: hidden;
+	border: 1px solid var(--uu-line);
+	border-radius: 14px;
+	background: var(--uu-surface);
+	box-shadow: var(--uu-shadow);
+}
+
+.uu-logs > summary {
+	padding: .85rem 1.25rem;
+	color: inherit;
+	font-size: .95rem;
+	font-weight: 650;
+	cursor: pointer;
+	list-style: none;
+}
+
+.uu-logs > summary::-webkit-details-marker { display: none; }
+.uu-logs > summary::before {
+	display: inline-block;
+	width: 1rem;
+	color: var(--uu-muted);
+	content: "▸";
+}
+
+.uu-logs[open] > summary::before { content: "▾"; }
+.uu-logs > summary:hover { background: var(--uu-tint); }
+
+.uu-logs pre {
+	max-height: 22rem;
+	margin: 0;
+	padding: 1rem 1.25rem;
+	overflow: auto;
+	border-top: 1px solid var(--uu-line);
+	color: var(--uu-muted);
+	font-size: .74rem;
+	line-height: 1.55;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+/* ---------------------------------------------------------- 响应式 -- */
+
+@media (max-width: 900px) {
+	.uu-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 700px) {
+	.uu-hero { align-items: flex-start; flex-direction: column; }
+	.uu-cards { grid-template-columns: 1fr; }
+	.uu-summary { grid-template-columns: 1fr; gap: .35rem; }
+}

@@ -9,7 +9,7 @@ from pathlib import Path
 def signature():
     files = [Path('sources.env'), Path('configs/acrh17.config')]
     files += sorted(Path('scripts').glob('patch-*.py'))
-    files += [Path('scripts/prepare.sh'), Path('package/ruijie-auth/Makefile')]
+    files += [Path('scripts/prepare.sh'), Path('package/uuplugin/Makefile')]
     return {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in files}
 
 if __name__ == '__main__':
@@ -19,7 +19,9 @@ if __name__ == '__main__':
     path = Path(directory) / 'compatibility.json'
     if mode == 'stamp':
         path.write_text(json.dumps(signature(), indent=2))
-        overlays = [str(p) for root in ('files', 'package/ruijie-auth/files') for p in Path(root).rglob('*') if p.is_file()]
+        # 只列项目自己的 files/：包内的文件由 ipk 安装，覆盖进来会得到「有页面
+        # 没有二进制」的镜像。
+        overlays = [str(p) for p in Path('files').rglob('*') if p.is_file()]
         (Path(directory) / 'overlay-paths.json').write_text(json.dumps(overlays))
         (Path(directory) / 'project-commit.txt').write_text(subprocess.check_output(['git','rev-parse','HEAD'], text=True))
     else:

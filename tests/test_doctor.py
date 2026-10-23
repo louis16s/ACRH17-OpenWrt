@@ -134,7 +134,9 @@ zram-swap - 34
 irqbalance - 1.9
 curl - 8.10
 jsonfilter - 2024
+libubus-lua - 2024
 luci-compat - 1.0
+uuplugin - 14.10.6
 ruijie-auth - 1.1.0
 luci-i18n-base-zh-cn - 1.0
 kmod-nft-queue - 6.6.151
@@ -454,6 +456,22 @@ class DetectionTests(DoctorTestCase):
         self.assertIn('L3 重写: TTL 64 + 去 TCP 时间戳', result.stdout)
         self.assertIn('全部通过。', result.stdout)
 
+    def test_a_missing_ruijie_package_is_information_not_a_fault(self):
+        # 固件按设计不编这个包（校园网由电脑浏览器直接登录）。doctor 在这台
+        # 机器上看到的应当是一句说明，而不是「没有 /etc/config/ruijie」那种
+        # 留给真故障的 FAIL——否则每一次体检都先报一个不存在的错。
+        for rel in ('usr/libexec/ruijie-auth', 'usr/libexec/ruijie-password',
+                    'usr/libexec/ruijie-refresh-query', 'etc/init.d/ruijie-auth',
+                    'etc/rc.d/S95ruijie-auth', 'etc/config/ruijie',
+                    'tmp/ruijie-auth.state'):
+            (self.fixture.root / rel).unlink()
+        result = self.fixture.run()
+        self.assertIn('锐捷认证没有安装（电脑浏览器直接登录），跳过服务检查', result.stdout)
+        self.assertIn('锐捷认证没有安装：路由器侧不做认证', result.stdout)
+        self.assertNotIn('没有 /etc/config/ruijie', result.stdout)
+        self.assertNotIn('[FAIL]', result.stdout, result.stdout)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
     def test_check_mode_changes_nothing(self):
         # check 是只读的：跑完之后整棵树必须逐字节相同，包括权限与符号链接。
         self.break_everything_fixable()
@@ -702,6 +720,15 @@ class DoctorSyncTests(unittest.TestCase):
         expected = re.search(r'for svc in ([^;]*); do', self.doctor).group(1).split()
         shipped = re.search(r'for service in ([^;]*); do', self.defaults).group(1).split()
         self.assertEqual(sorted(expected), sorted(shipped))
+
+    def test_project_packages_the_config_enables_are_checked(self):
+        # 这套固件自己维护的包（package/*/Makefile）如果被配置选中，doctor
+        # 就该检查它装没装上；没选中（ruijie-auth）则连提都不该提。
+        config = (ROOT / 'configs/acrh17.config').read_text(encoding='utf-8')
+        enabled = set(re.findall(r'^CONFIG_PACKAGE_([\w-]+)=y$', config, re.M))
+        local = {p.parent.name for p in (ROOT / 'package').glob('*/Makefile')}
+        core = set(re.search(r"core='([^']*)'", self.doctor).group(1).split())
+        self.assertEqual(sorted(enabled & local), sorted(core & local))
 
     def test_turboacc_keys_match_the_runtime_patch(self):
         keys = re.search(r'for key in (sw_flow[^;]*); do', self.doctor).group(1).split()

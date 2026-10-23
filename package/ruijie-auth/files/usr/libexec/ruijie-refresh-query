@@ -87,8 +87,8 @@ fi
 case "$LOCATION" in
 	*index.jsp\?*) QUERY="${LOCATION#*index.jsp?}" ;;
 	*)
-		save_state authenticating pending "Redirect is not a portal login page: $LOCATION"
-		echo "ERROR: redirect is not a portal login page: $LOCATION"
+		save_state authenticating pending 'Redirect is not a portal login page'
+		echo 'ERROR: redirect is not a portal login page'
 		exit 1 ;;
 esac
 
@@ -116,8 +116,8 @@ origin_of() {
 # and non-empty. A case pattern cannot express that: "?" is a glob wildcard and
 # "|" is an alternation, so "*wlanuserip=?*|*mac=?*" accepts either one alone.
 if [ -z "$(field "$QUERY" wlanuserip)" ] || [ -z "$(field "$QUERY" mac)" ]; then
-	save_state authenticating pending "Captured query string is missing wlanuserip or mac: $QUERY"
-	echo "ERROR: captured query string is missing wlanuserip or mac: $QUERY"
+	save_state authenticating pending 'Captured query string is missing wlanuserip or mac'
+	echo 'ERROR: captured query string is missing wlanuserip or mac'
 	exit 1
 fi
 
@@ -133,8 +133,7 @@ uci commit ruijie
 logger -t ruijie-auth "query-string refreshed for $WAN_IP (portal ${SERVER:-none})"
 
 echo "WAN      : $WAN_IP"
-echo "旧 query : $OLD"
-echo "新 query : $QUERY"
+echo "query    : 已更新（${#QUERY} 字节，包含 wlanuserip 与 mac）"
 echo "门户地址 : ${SERVER:-未识别（重定向里没有 origin）}"
 echo
 
@@ -145,14 +144,16 @@ if [ "$1" = capture ]; then
 fi
 
 save_state authenticating pending 'query string refreshed; authenticating'
-/usr/libexec/ruijie-auth reauth && exit 0
+/usr/libexec/ruijie-auth reauth
+AUTH_RC=$?
+[ "$AUTH_RC" -eq 0 ] && exit 0
 
-# A capture that does not authenticate is worse than the value it replaced, so
-# put the previous string back and let the normal retry path run. The portal
-# address came out of the same Location as the query, so it goes back with it:
-# a new server next to the old query is a pair that never existed, and the next
-# login would be sent to a portal that does not know this string.
-if [ -n "$OLD" ]; then
+# Restore the previous pair only when the portal explicitly rejects this query.
+# Network errors and unreadable responses do not prove that a freshly captured,
+# link-bound query is unusable, so keep it for the next retry.
+if [ "$AUTH_RC" -eq 1 ] &&
+	[ "$(cat /tmp/ruijie-auth.last 2>/dev/null)" = 'login: portal rejected request' ] &&
+	[ -n "$OLD" ]; then
 	uci set "$CFG.query_string=$OLD"
 	restored='the previous query string'
 	if [ -n "$SERVER" ]; then
@@ -162,5 +163,8 @@ if [ -n "$OLD" ]; then
 	uci commit ruijie
 	logger -t ruijie-auth "reauth failed; restored $restored for $WAN_IP"
 	echo "reauth failed; restored $restored"
+else
+	logger -t ruijie-auth "reauth did not confirm the refreshed query; keeping it for retry on $WAN_IP"
+	echo 'reauth did not confirm the refreshed query; keeping it for retry'
 fi
 exit 1

@@ -10,7 +10,8 @@ OpenWrt、packages、LuCI、routing 和 UA3F 的提交固定在 `sources.env`。
 | --- | --- |
 | LuCI HTTPS、中文、Argon Dark 主题 | `luci-ssl`、`luci-app-package-manager`、`luci-theme-argon`、`LUCI_LANG_zh_Hans` |
 | UA3F 图形管理 | UA3F v3.6.0 系列的 `ua3f` 包自带 Lua LuCI，锁定官方最新提交 `7a3869714df6...`；保留 `luci-compat`，首次启动即启用 |
-| 锐捷 ePortal | 自定义 `ruijie-auth`、curl、jsonfilter，LuCI 配置及手动登录/注销 |
+| 校园网 | 路由器不参与认证，由每台电脑的浏览器直接登录门户；`ruijie-auth` 源码与测试留在仓库，默认不编入镜像 |
+| 网易 UU 远程开机 / 游戏加速 | 官方预编译 armv7 插件（静态链接、不经交叉编译）、单 procd 服务、Lua LuCI 管理页 |
 | 双 WAN | `mwan3`、`luci-app-mwan3`、legacy iptables/ip6tables、ipset；系统防火墙为 firewall4 |
 | Android / USB 网卡 / F50 | RNDIS、CDC Ethernet、CDC NCM 驱动 |
 | MBIM 备用支持 | `kmod-usb-net-cdc-mbim`、`umbim`、`luci-proto-mbim`，自动带入 WDM |
@@ -163,7 +164,20 @@ UA3F 原始 TPROXY 标记 `0x1c9` 与 mwan3 默认 `0x3f00` 掩码有交集。
 验证；开启这些功能前应单独验证。透明代理产生的新上游连接来自路由器，
 按 LAN 客户端源地址制定的 mwan3 策略不一定继续适用。
 
-## 锐捷 ePortal
+## 锐捷 ePortal（默认不编入镜像）
+
+校园网由**每台电脑自己的浏览器**登录门户，路由器不参与认证：它不持有账号密码、
+不保存 queryString/Cookie，也没有一个每分钟探一次门户的后台进程。因此
+`CONFIG_PACKAGE_ruijie-auth` 在 `configs/acrh17.config` 里是显式关闭的
+（`# CONFIG_PACKAGE_ruijie-auth is not set`），镜像里不再有门户页面、凭据文件
+和 `S95` 服务，`/etc/config` 里也没有 `ruijie` 这一份配置。
+
+包源码、Lua 页面和配套测试仍保留在 `package/ruijie-auth`，`scripts/` 下的
+`acrh17-campus-up.sh` 与 `acrh17-doctor.sh` 也保留了对它的适配。真遇到「路由器
+必须替整栋楼代认证」的校园网，把配置里那一行改成 `CONFIG_PACKAGE_ruijie-auth=y`
+重新出固件即可，`verify-config.py` 会确认排除/包含在 `defconfig` 之后仍然生效。
+
+代认证版本来怎么用（需要时）：
 
 进入「服务 → Ruijie ePortal」，填写校园网页成功登录请求中的字段：
 server、userId、password、service、queryString、Cookie、Referer 等。
@@ -182,15 +196,79 @@ server、userId、password、service、queryString、Cookie、Referer 等。
 不把门户返回内容或认证字段写入 syslog。HTTP 成功但门户返回认证失败时，
 脚本会返回失败状态。界面操作区绑定真实的 UCI section。
 
-页面顶部是状态面板，汇总认证服务、校园 WAN 与默认网关、最近一次认证结果、
-自动重连和最近一次快捷操作；认证日志折叠在页面底部，一次读取 80 行。
-状态胶囊表示**链路是否可达**，而不是「最近一次请求是否成功」：在线时再点一次
-「立即登录」会被门户按重复登录拒绝，该结果照常写入「最近认证结果」，但不会把
-已经联网的链路标成失败。只有服务认为链路可用时才重新探测，因此守护进程在
-探测失败后的重试路径不会为同一件事多付一次探测超时。
-
 这不是通用校园协议自动发现器：若门户要求动态 RSA、验证码、每次更新的
 queryString/Cookie 或会话令牌，需要根据该校园的成功请求进一步适配。
+
+## UU 加速器（网易 UU 插件）
+
+「服务 → UU 加速器」是网易 UU 插件的管理页。插件是官方 `openwrt-arm` 通道的
+预编译二进制（v14.10.6，静态 ELF32 ARM，不需要交叉编译），固件侧只解决三件事：
+装到哪、身份存哪、谁来拉起。
+
+| 路径 | 内容 |
+| --- | --- |
+| `/usr/lib/uu/` | 只读区（squashfs）：`uuplugin`、`xuplugin-guardian`、`xtables-nft-multi`、`uu.conf` |
+| `/tmp/uu/` | 运行目录（tmpfs）：启动时从只读区复制，插件以 cwd 定位配置与身份文件 |
+| `/etc/uu/id/` | 身份持久层（0700）：`.sn`、`.uuplugin_uuid`、`activate_status` |
+
+运行目录必须是 `/tmp/uu`：插件以 cwd 为基准读写 `uu.conf` 与身份文件，并把
+`activate_status` 写成绝对路径 `/tmp/uu/activate_status`。跑在只读区会写失败，
+直接 cwd 到 overlay 会让这个闭源进程持续写 flash。
+
+身份也不能只放 `/tmp`：tmpfs 清空后插件会重新生成身份，云端把它当成新设备，
+App 里就必须重绑。所以启动时从 `/etc/uu/id` 回填，停机时回写。`/etc` 不在
+sysupgrade 的默认保留清单里，包内因此另装了 `/lib/upgrade/keep.d/uuplugin`
+列出 `/etc/uu`——少了这一条，每次升级都会丢掉绑定。
+
+下载地址把版本号写进路径（`/v14.10.6/uu.tar.gz`），并用 `PKG_HASH`（整包 sha256）
+校验内容：上游发新版只会让构建取不到或校验失败，不会悄悄换掉镜像里的插件。插件随
+固件冻结、不做运行时自更新，云侧协议变更需要重新出固件。
+
+页面顶部是六项实际取值：进程、云端通道、本地 API、设备序列号、激活状态、插件版本。
+云端通道的判据与 `netstat | grep :16000` 是同一条——连接处于 ESTABLISHED，且这条
+socket 的 inode 在 `uuplugin` 或 `xuplugin-guardian` 的 fd 里；只按端口判断，会在
+别的进程恰好连上 16000 时报「已连接」。本地 API（`127.0.0.1:16363`）连得上说明
+进程在服务，它返回的 sn 还会与页面显示的身份比对。「未连接」只表示控制通道不在，
+不等于进程停止。插件自建的 6 张 `XU_ACC_MAIN_*` 表只在实际下发加速规则时出现，
+平时 0 张是正常的。
+
+显示「未连接」而进程仍在运行时，先看 UA3F：本机出站 TCP 被 TPROXY 接管，UA3F
+进程挂掉而规则残留会把插件的 :16000 一起黑洞掉，排障顺序是 UA3F 状态 →
+`:16000` 归属进程 → 插件自身。
+
+第一次使用在手机 App 里添加并绑定路由器；绑定关系由插件自己维护，页面只读。
+换固件时保住既有绑定，先停插件，把旧固件的身份三件套写回 `/etc/uu/id` 再启动：
+
+```sh
+/etc/init.d/uuplugin stop
+scp ./uu-id/* root@192.168.5.1:/etc/uu/id/
+/etc/init.d/uuplugin start
+curl -s http://127.0.0.1:16363/router      # sn 应与迁移前一致
+```
+
+不做迁移的话，在 App 里删掉设备重新添加即可，代价约一分钟。
+
+镜像增量约 2.0 MB（三个二进制 xz 后共 2,001,200 字节；sysupgrade 镜像此前
+15.7 MB，设备 `IMAGE_SIZE` 上限 20,439,364 字节），余量约 2.7 MB。
+包依赖 `ca-bundle`（插件访问云端 443）、`luci-compat` 与 `luci-lib-nixio`（页面），
+并用 `@arm` 限定目标架构。内核侧需要 `NF_TABLES`（含 nat/mangle/filter）与
+`CONFIG_NF_CONNTRACK_PROCFS`，ImmortalWrt 24.10 默认已满足；加速走
+「DNS 指向假 IP + DNAT 到本地端口」，不需要 `kmod-tun`。
+
+### 不用它的时候
+
+`uuplugin.main.enabled=0`（或页面上的「启用插件」开关关掉）时，`start_service`
+只写一行日志就返回：procd 不起实例，不复制 6.5 MB 的二进制，也不建任何 nft 表。
+`stop_service` 在保存身份之后会把 `/tmp/uu` 整个删掉——那是 tmpfs 里的三份二进制
+副本，约 6.5 MB 内存，服务停着的时候没有理由继续占着；`/etc/uu/id` 里那三个小文件
+留着，否则下次得在 App 里重新绑定。彻底不用就 `opkg remove uuplugin`，只读区的
+2.5 MB 也一起收回去。
+
+以下三点只能刷机后确认：只读区文件复制到 `/tmp/uu` 后能否正常 fork/exec 同目录的
+守护进程与 `xtables-nft-multi`；`save_id` 在 `reboot` 与 `sysupgrade` 路径上是否真的
+执行；`log_level=debug` 的实际效果（闭源程序只暴露这一个日志开关，页面只把它写进
+运行副本，包内 `uu.conf` 不动）。LuCI 页面本身没有在真机上渲染过；模板编译、
+脚本语法与模板-模型的字段约定由 `tests/test_uuplugin.py` 在 CI 里核对。
 
 ## USB 打印
 
@@ -203,29 +281,15 @@ queryString/Cookie 或会话令牌，需要根据该校园的成功请求进一�
 p910nd 不提供渲染驱动，也不保证所有仅支持专有协议的打印机可用。
 若双向模式导致异常，可在 LuCI 切换该选项后重新测试。
 
-## 校园认证、维护命令和自动恢复
+## 维护命令和自动恢复
 
-「服务 → Ruijie ePortal / 锐捷认证」显示 procd 服务状态、最近认证状态、
-校园 WAN 逻辑接口及 IPv4 地址、默认网关、最近认证时间/结果/摘要和自动重连
-状态。按钮按用途分成三组，同组按钮并排一行：「认证操作」是立即登录、注销认证、
-重新认证；「服务与网络」是重新获取 WAN DHCP、重新抓取 queryString、重启认证
-服务、清除最近结果；「密码管理」是验证当前密码、回退到上一个密码、丢弃密码
-回退点。分组不只是排版：CBI 会把一个 section 里的选项排成一列，所以同组按钮
-必须落在同一个 section 里才会同行。手动操作与后台登录共用一把锁，锁忙时不会
-误判为认证失败。所有按钮都在后台以短超时执行，避免 LuCI 因门户超时而卡住；
-最近日志仅从 RAM 中的 `logread` 读取 80 行。
+镜像里没有「服务 → Ruijie ePortal」页面，也没有锐捷认证服务：认证发生在每台电脑
+的浏览器里，路由器没有可登录、可探测、可重试的会话。这一节剩下的都是与认证无关、
+但要长期在线的那些东西。
 
-自动恢复支持开机认证、断线重认证、检测及失败重试起始间隔、最大失败次数，以及仅重试、
-重启 WAN 逻辑接口或重启认证服务三种失败动作。默认不会重启整台路由器。
-认证请求前会先检查 WAN 逻辑接口是否 up 且已获得 IPv4；DHCP 未就绪时仅等待，
-不会先执行联网探测再执行门户请求。认证失败采用有限退避：默认从 30 秒开始，
-依次为 45 秒、60 秒，之后保持 60 秒；达到配置的最大连续失败次数后，只有重启
-WAN 或重启服务动作会清零退避，选择“仅继续重试”会保持封顶间隔。
-
-「系统 → 自定义命令」预置重新认证锐捷、刷新锐捷认证参数、重启 UA3F、重拨
-UCI 中配置的 USB WAN、重启 p910nd、查看 USB 设备及查看 USB 网络驱动状态。
-USB WAN 默认逻辑接口名为 `usbwan`，可通过 `acrh17.settings.usbwan_interface`
-调整；命令不会重启校园 WAN。
+「系统 → 自定义命令」预置重启 UA3F、重拨 UCI 中配置的 USB WAN、重启 p910nd、
+查看 USB 设备及查看 USB 网络驱动状态。USB WAN 默认逻辑接口名为 `usbwan`，
+可通过 `acrh17.settings.usbwan_interface` 调整；命令不会重启校园 WAN。
 
 watchcat 已编译但默认关闭，也没有预置实例。升级保留配置时禁用状态会被重新
 应用（`/etc/rc.d` 不在任何保留清单内，重建 rootfs 会让它复位），不会意外
@@ -479,7 +543,8 @@ TurboACC 的三个卸载必须为 0、UA3F 的 L3 重写三元组、`mwan3.globa
 机是否还自洽。
 
 边界是刻意划的。会断线或者会覆盖用户选择的修复不进默认路径：LAN 地址、WAN 协议、
-Wi-Fi 密码和 2.4G/5G 信道只报告不修改，无线模式（HT20/VHT80）要 `--fix-wifi`，
+Wi-Fi 密码、无线监管域、用户主动禁用的无线电台和 2.4G/5G 信道只报告不修改，
+无线模式（HT20/VHT80）要 `--fix-wifi`，
 门户重新认证要 `--fix-auth`。信道不在可修复项里不是漏了：射频环境会变，而写死的信道
 在环境变了以后不会自己纠正，只会把人从好信道推到坏信道上（这条是 09-15 踩出来的，
 见下面 09-15 的信道一节）。模式是另一类东西——HT20/VHT80 是网卡能力问题，跟邻居
@@ -615,3 +680,33 @@ ch5 上一台 **-45 dBm** 的 `SCAUNET_1x` 把 ch6 压到 -44 dBm，而 ch1 是 
 问题不会报错，只会安静地慢，所以 doctor 才要按能力值而不是按「有没有配」去比。
 
 真机复跑：64 通过、1 警告（上面那条门户状态错位）、0 失败。
+
+## 2026-10-23 认证从路由器上撤掉，UU 插件进镜像
+
+锐捷认证这件事定下来了：**路由器不再登录门户**。每台电脑用自己的浏览器登录校园网，
+路由器只负责转发——它不需要凭据，也不需要每分钟探一次「还通不通」。所以
+`ruijie-auth` 从镜像里摘掉（`# CONFIG_PACKAGE_ruijie-auth is not set`），一并消失的
+是门户 LuCI 页面、`/etc/config/ruijie` 里的密码、`S95ruijie-auth` 这个开机服务，以及
+「系统 → 自定义命令」里那两条锐捷命令。源码、Lua 页面和 46 个测试留在
+`package/ruijie-auth`，需要路由器代认证的校园网把它改回 `=y` 就行。
+
+摘掉之后系统侧的变化是可数的：少一个 0600 的凭据文件、少一个 procd 服务、少一条
+每 60 秒一次的 `ubus` + 两次 `jsonfilter` + 一次 `curl` 的探测链。doctor 现在把
+「没装锐捷认证」当信息而不是故障（`[INFO]` 一行），`--fix-auth` 在没有包时也不会
+再对着一个不存在的二进制发号施令。
+
+UU 插件同时接入镜像，并且把「不用的时候不占资源」写进了启动脚本：关掉开关时
+`start_service` 直接返回；`stop_service` 在把身份写回 `/etc/uu/id` 之后删掉 `/tmp/uu`
+——那是 tmpfs 里的三份二进制副本，约 6.5 MB 内存，停着的时候没有理由继续占着。
+停止也不再无条件 `sleep 1`：进程已经退了就不等，重启和升级路径各省一秒。
+
+镜像账：UU 三个二进制 xz 后 2,001,200 字节（约 +2.0 MB），锐捷认证据包退出的
+文件与依赖抵消掉一部分；上一版镜像 15.7 MB，上限 20,439,364 字节，余量仍在 2 MB
+以上。
+
+两处配套改动跟着一起来了。其一，ImageBuilder 的包索引里没有 `uuplugin`（二进制是
+完整构建时从上游取的），所以完整构建把编好的 ipk 放进 `fast-base/packages/`，
+快速打包把它换成文件路径安装；基线产物里没有这份 ipk 时直接报错，不会打出
+「有页面没插件」的固件。其二，doctor 的核心软件包清单现在包含 `uuplugin`——
+它被配置选中就该在镜像里，清单和 `configs/acrh17.config` 由一条测试锁在一起，
+以后谁把某个包 `=y` 了却忘了让 doctor 检查，测试会先叫。

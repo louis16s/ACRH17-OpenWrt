@@ -227,17 +227,21 @@ clear_results() {
 refresh_query_login() {
 	[ "$(get auto_refresh_query)" = 1 ] || return 1
 	OLD_QUERY="$(get query_string)"
+	OLD_SERVER="$(get server)"
 	/usr/libexec/ruijie-refresh-query capture >/dev/null 2>&1 || return 1
 	[ "$(get query_string)" != "$OLD_QUERY" ] || return 1
 	logger -t ruijie-auth 'query-string refreshed; retrying login'
 	portal login >/dev/null 2>&1
 	RC=$?
-	# A capture that does not authenticate is worse than the string it replaced,
-	# so put the previous one back and let the ordinary retry path continue.
-	if [ "$RC" -eq 1 ] && [ -n "$OLD_QUERY" ]; then
+	# A network error or unreadable response says nothing about a fresh,
+	# link-bound query. Roll it back only after an explicit portal rejection.
+	if [ "$RC" -eq 1 ] &&
+	   [ "$(cat "$LAST" 2>/dev/null)" = 'login: portal rejected request' ] &&
+	   [ -n "$OLD_QUERY" ]; then
 		uci set "ruijie.main.query_string=$OLD_QUERY"
+		uci set "ruijie.main.server=$OLD_SERVER"
 		uci commit ruijie
-		logger -t ruijie-auth 'login with the refreshed query string failed; restored the previous value'
+		logger -t ruijie-auth 'portal rejected the refreshed query string; restored the previous query and server'
 	fi
 	return "$RC"
 }

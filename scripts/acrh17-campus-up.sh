@@ -229,9 +229,9 @@ ALREADY_ONLINE=0
 auth status >/dev/null 2>&1 && ALREADY_ONLINE=1
 
 if [ -n "$LOCATION" ] && is_portal_page "$LOCATION"; then
-	ok "门户重定向: ${LOCATION}"
+	ok "门户重定向: $(origin_of "$LOCATION")（包含本链路 query 参数）"
 elif [ -n "$LOCATION" ]; then
-	warn "看到了重定向，但不是门户登录页，忽略：${LOCATION}"
+	warn "看到了非门户重定向（来源 $(origin_of "$LOCATION")），忽略"
 elif [ "$ALREADY_ONLINE" = 1 ]; then
 	ok '校园链路已经在线，没有重定向可抓'
 else
@@ -399,7 +399,9 @@ else
 fi
 
 if [ ! -x "${ROOT}/etc/init.d/ruijie-auth" ]; then
-	fail '缺少 /etc/init.d/ruijie-auth'
+	# 这个包按设计没编进镜像（校园网由电脑浏览器直接登录）。本脚本是那套
+	# 代认证方案的配套工具，缺包就是缺方案本身，说清楚怎么办比只说缺文件有用。
+	fail '镜像里没有 ruijie-auth：把 configs/acrh17.config 的 CONFIG_PACKAGE_ruijie-auth 改成 =y 重新出固件'
 elif [ -e "${ROOT}/etc/rc.d/S95ruijie-auth" ]; then
 	ok '开机自启已启用'
 elif [ "$MODE" = fix ]; then

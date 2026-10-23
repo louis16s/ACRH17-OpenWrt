@@ -1,0 +1,5 @@
+config main 'main'
+	# 关掉之后 procd 不再拉起插件，LuCI 里的开关写的就是这一项。
+	option enabled '1'
+	# 只改运行副本 /tmp/uu/uu.conf 的 log_level 一行，包内的 uu.conf 保持原样。
+	option log_level 'info'

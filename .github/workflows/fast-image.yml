@@ -58,16 +58,25 @@ jobs:
           mkdir -p imagebuilder overlay artifacts
           tar --zstd -xf baseline/*imagebuilder*.tar.zst --strip-components=1 -C imagebuilder
           cp -a files/. overlay/
-          cp -a package/ruijie-auth/files/. overlay/
-          chmod 600 overlay/etc/config/ruijie
           # The overlay keeps the mode it was copied with, so every script has
           # to be executable here regardless of what git recorded.
-          chmod 755 overlay/usr/libexec/* overlay/etc/init.d/ruijie-auth
+          chmod 755 overlay/usr/libexec/*
           packages=$(python3 - <<'PY'
           from pathlib import Path
           print(' '.join(x.removeprefix('CONFIG_PACKAGE_').removesuffix('=y') for x in Path('configs/acrh17.config').read_text().splitlines() if x.startswith('CONFIG_PACKAGE_') and x.endswith('=y') and '_INCLUDE_' not in x))
           PY
           )
+          # uuplugin 的二进制在完整构建时从上游下载，ImageBuilder 的包索引里没有
+          # 它。基线产物带了编好的 ipk，这里换成文件路径安装；基线里没有就别
+          # 浪费时间打包——装不进去的插件会让 verify-artifacts.py 拒绝镜像。
+          case " $packages " in
+            *" uuplugin "*)
+              # make -C imagebuilder 会切目录，ipk 必须给绝对路径。
+              ipk=$(ls "$PWD"/baseline/packages/uuplugin_*.ipk 2>/dev/null | head -1)
+              [ -n "$ipk" ] || { echo '基线产物里缺 uuplugin.ipk，请重跑一次完整构建' >&2; exit 1; }
+              packages=${packages/uuplugin/$ipk}
+              ;;
+          esac
           make -C imagebuilder image PROFILE=asus_rt-ac42u PACKAGES="$packages" FILES="$PWD/overlay" 2>&1 | tee fast-build.log
           python3 scripts/verify-artifacts.py imagebuilder/bin/targets/ipq40xx/generic --sysupgrade-only
           cp -a imagebuilder/bin/targets/ipq40xx/generic/. artifacts/

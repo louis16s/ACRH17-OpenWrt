@@ -1,0 +1,53 @@
+<%
+-- 面板上的每个值都在 CBI 模型里算好了一次：一次 pidof、一次 /proc/net/tcp 读取、
+-- 一次本地 API 探测。模板只负责排版，不在这里读文件或起进程。
+--
+-- 面板头用 <div> 而不是 <header>：argon 对裸 <header> 元素有全局样式，会挂一条
+-- header::after 色带压在标题上。
+local pcdata = require "luci.xml".pcdata
+
+local states = {
+	online  = { label = "已连接", cls = "online"  },
+	working = { label = "未连接", cls = "working" },
+	offline = { label = "已停止", cls = "offline" },
+}
+local state = states[self.state or ""] or states.offline
+
+local function value(v)
+	v = (v == nil) and "" or tostring(v)
+	return v ~= "" and v or "-"
+end
+
+local cards = {
+	{ label = "插件进程",   value = value(self.process),   hint = value(self.process_hint) },
+	{ label = "云端通道",   value = value(self.cloud),     hint = value(self.cloud_hint) },
+	{ label = "本地 API",   value = value(self.api),       hint = value(self.api_hint) },
+	{ label = "设备序列号", value = value(self.sn),        hint = value(self.sn_hint) },
+	{ label = "激活状态",   value = value(self.activated), hint = value(self.activated_hint) },
+	{ label = "插件版本",   value = value(self.version),   hint = value(self.version_hint) },
+}
+%>
+<link rel="stylesheet" href="<%=resource%>/uuplugin/dashboard.css">
+<div class="uu-dashboard">
+	<div class="uu-hero">
+		<div>
+			<h3>UU 加速器状态</h3>
+			<p>云端控制通道、本地 API 与设备身份的实际取值。</p>
+		</div>
+		<span class="uu-pill <%=state.cls%>"><i></i><%=state.label%></span>
+	</div>
+	<div class="uu-cards">
+<%
+for _, card in ipairs(cards) do
+	write('<div class="uu-card"><span>' .. pcdata(card.label) .. '</span><strong>'
+		.. pcdata(value(card.value)) .. '</strong><small>' .. pcdata(value(card.hint))
+		.. '</small></div>')
+end
+%>
+	</div>
+	<div class="uu-summary">
+		<b>身份</b>
+		<span>运行副本在 /tmp/uu，持久副本在 /etc/uu/id；停机和 sysupgrade 前会写回，
+		重启时回填。身份变了，App 里就要重新绑定设备。</span>
+	</div>
+</div>

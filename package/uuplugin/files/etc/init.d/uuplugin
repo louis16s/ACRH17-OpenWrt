@@ -1,0 +1,116 @@
+#!/bin/sh /etc/rc.common
+# 网易 UU 路由器插件
+#
+#   /usr/lib/uu   只读区（squashfs），包内原始文件
+#   /tmp/uu       运行目录。插件以 cwd 定位 uu.conf 与身份文件，且会把
+#                 activate_status 写成绝对路径 /tmp/uu/activate_status，
+#                 所以这个路径由二进制决定，不是可选项
+#   /etc/uu/id    身份持久层：启动回填、停止回写、sysupgrade 保留
+#
+# 二进制是静态 ELF32 ARM，没有动态加载器参与；官方要求栈上限 8192 KB，
+# 由 command 里的 ulimit 提供，procd 本身不设栈限制。
+
+USE_PROCD=1
+START=95
+STOP=10
+
+BIN_DIR=/usr/lib/uu
+RUN_DIR=/tmp/uu
+ID_DIR=/etc/uu/id
+FILES="uuplugin xuplugin-guardian xtables-nft-multi uu.conf"
+ID_FILES=".sn .uuplugin_uuid activate_status"
+
+prepare() {
+	mkdir -p "$RUN_DIR" || return 1
+	mkdir -p "$ID_DIR" && chmod 700 "$ID_DIR"
+
+	# 只读区 → tmpfs。插件会 fork 同目录的 xuplugin-guardian、调用同目录的
+	# xtables-nft-multi，两者都必须在 cwd 里存在；而直接 cwd 到 overlay 会让
+	# 这个闭源进程持续写 flash。
+	for f in $FILES; do
+		[ -f "$BIN_DIR/$f" ] || { logger -t uuplugin "missing $BIN_DIR/$f"; return 1; }
+		cp -f "$BIN_DIR/$f" "$RUN_DIR/$f" || return 1
+	done
+	chmod 0755 "$RUN_DIR/uuplugin" "$RUN_DIR/xuplugin-guardian" \
+		"$RUN_DIR/xtables-nft-multi"
+
+	# 日志级别来自 UCI，只改运行副本的 log_level 一行：version 那一行是插件
+	# 自报的版本号，必须保持包内原值。这里不用 sed -i——它有 GNU 与 BSD 两种
+	# 参数约定，写成临时文件再覆盖在两边都一样。
+	level=$(uci -q get uuplugin.main.log_level)
+	case "$level" in
+	info|debug)
+		sed "s/^log_level=.*/log_level=$level/" "$RUN_DIR/uu.conf" \
+			> "$RUN_DIR/uu.conf.new" &&
+			mv -f "$RUN_DIR/uu.conf.new" "$RUN_DIR/uu.conf"
+		;;
+	esac
+
+	# 身份回填：tmpfs 清空后插件会重新生成身份，云端就把它当成新设备。
+	for f in $ID_FILES; do
+		[ -s "$ID_DIR/$f" ] && cp -f "$ID_DIR/$f" "$RUN_DIR/$f"
+	done
+	chmod 0600 "$RUN_DIR/.sn" "$RUN_DIR/.uuplugin_uuid" 2>/dev/null
+	return 0
+}
+
+save_id() {
+	mkdir -p "$ID_DIR" || return 1
+	chmod 700 "$ID_DIR"
+	for f in $ID_FILES; do
+		[ -s "$RUN_DIR/$f" ] && cp -f "$RUN_DIR/$f" "$ID_DIR/$f"
+	done
+	chmod 0600 "$ID_DIR/.sn" "$ID_DIR/.uuplugin_uuid" 2>/dev/null
+	return 0
+}
+
+start_service() {
+	[ "$(uci -q get uuplugin.main.enabled)" = "1" ] || {
+		logger -t uuplugin "disabled in /etc/config/uuplugin"
+		return 0
+	}
+
+	prepare || { logger -t uuplugin "prepare failed, not starting"; return 1; }
+
+	procd_open_instance
+	procd_set_param command /bin/sh -c 'ulimit -HS -s 8192; cd /tmp/uu && exec ./uuplugin ./uu.conf'
+	# 云端 :16000 控制通道由插件自己重连，procd 只在进程真的退出时补一个，
+	# 所以阈给足、间隔放开，避免频繁重启打断重连。
+	procd_set_param respawn 3600 5 5
+	procd_set_param stdout 1
+	procd_set_param stderr 1
+	procd_close_instance
+
+	logger -t uuplugin "started"
+}
+
+stop_service() {
+	# 守护进程是 uuplugin 自己 fork 的，procd 只持有前者；两个都收掉，
+	# 否则重新 start 时会撞上残留的 guardian。分两次调用，不依赖 killall
+	# 是否接受多个进程名。
+	killall -q uuplugin
+	killall -q xuplugin-guardian
+	# 只有确实还没退干净时才等：以前这里是无条件 sleep 1，重启、关机、升级
+	# 每条路径都白等一秒，而 killall 到进程消失通常只要几十毫秒。
+	[ -z "$(pidof uuplugin)" ] || sleep 1
+
+	# 关机与 sysupgrade 之前把身份写回持久层：用户重新绑定时插件会把新 UUID
+	# 写进 tmpfs，不回写的话下次启动又被旧值覆盖回去。必须在删运行目录之前。
+	save_id
+
+	# 运行目录是 tmpfs，三个二进制副本加起来约 6.5 MB，都是 RAM。服务停着的时候
+	# 没有理由继续占着它们；下次 start 会从只读区重新复制。
+	rm -rf "$RUN_DIR"
+
+	# 插件建的 6 张表不属于 fw4，nftables 不会随防火墙重载清理掉它们。
+	for t in ip ip6; do
+		for s in filter mangle nat; do
+			nft delete table $t XU_ACC_MAIN_$s 2>/dev/null
+		done
+	done
+
+	logger -t uuplugin "stopped, identity saved, runtime copy released, nft tables cleaned"
+}
+
+# 不注册 network reload 触发器：fw4/network 重载很频繁，跟着重启会反复断开
+# 云端通道，而插件自身具备重连能力。

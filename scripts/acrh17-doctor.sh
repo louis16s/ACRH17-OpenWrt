@@ -13,7 +13,7 @@
 # 关掉、恢复 UA3F/mwan3 存在时不允许的 TurboACC 卸载、修回文件权限、把锐捷密码
 # 状态机里「值丢失」的两种状态补回去。两个默认关闭的开关用于会动到用户可见设置
 # 的修复：
-#   --fix-wifi   按 2026-09-14 的实测选台重设 2.4G ch6/HT20、5G ch36/VHT80
+#   --fix-wifi   把 2.4G/5G 无线模式修回 HT20/VHT80
 #   --fix-auth   探测确认离线时执行一次 /usr/libexec/ruijie-auth reauth
 #
 # 无论哪种模式都不会改动 Wi-Fi 密码、LAN 地址、WAN 协议或 mwan3 自定义规则，
@@ -40,7 +40,7 @@ usage() {
   --host [user@]地址   从开发机远程执行；把本脚本通过 ssh 送到路由器上运行
   --ssh-key 路径       远程模式用的私钥；ssh 只会自动尝试 id_rsa/id_ecdsa/id_ed25519
   --expect-stamp 值    期望的固件版本戳（YYYYMMDD-HHMM），不匹配时报错
-  --fix-wifi           重设 2.4G ch6/HT20 与 5G ch36/VHT80
+  --fix-wifi           把 2.4G/5G 无线模式修回 HT20/VHT80
   --fix-auth           探测确认离线时执行一次 reauth
   -h, --help           显示本帮助
 EOF
@@ -385,8 +385,11 @@ group_services() {
 		fi
 	done
 
-	# 锐捷认证服务：配置里打开才要求自启；打开了却没跑才算失败。
-	if [ "$(uget ruijie.main.enabled)" = 1 ]; then
+	# 锐捷认证服务：这个包按设计没有编进固件（校园网由电脑浏览器直接登录），
+	# 所以先看装没装；没装就跳过，装了才按「配置里打开才要求自启」判定。
+	if [ ! -x "${ROOT}/usr/libexec/ruijie-auth" ]; then
+		info '锐捷认证没有安装（电脑浏览器直接登录），跳过服务检查'
+	elif [ "$(uget ruijie.main.enabled)" = 1 ]; then
 		if svc_running ruijie-auth || cmd_running '[/]usr/libexec/ruijie-auth daemon'; then
 			ok '锐捷认证服务在运行'
 		else
@@ -718,17 +721,15 @@ group_wireless() {
 		country="$(uget "wireless.${radio}.country")"
 		channel="$(uget "wireless.${radio}.channel")"
 		htmode="$(uget "wireless.${radio}.htmode")"
-		if [ "$disabled" = 0 ]; then
-			ok "${radio}(${band}) 未禁用"
-		else
-			trouble "${radio}(${band}) 是禁用的" \
-				"uci -q set wireless.${radio}.disabled=0 && uci -q commit wireless && wifi reload"
-		fi
+		case "$disabled" in
+			0|'') ok "${radio}(${band}) 未禁用" ;;
+			1) info "${radio}(${band}) 按配置禁用，保留用户选择" ;;
+			*) warn "${radio}(${band}) 的 disabled 值异常（${disabled}），保留不动" ;;
+		esac
 		if [ "$country" = "$country_default" ]; then
 			ok "${radio} 国家码 ${country}"
 		else
-			trouble "${radio} 国家码 ${country:-未设}，应为 ${country_default}" \
-				"uci -q set wireless.${radio}.country=${country_default} && uci -q commit wireless && wifi reload"
+			warn "${radio} 国家码是 ${country:-未设}，项目默认 ${country_default}；保留当前设置，请按所在地法规核对"
 		fi
 		info "${radio} 信道 ${channel:-auto} / 模式 ${htmode:-默认}"
 
@@ -778,6 +779,14 @@ group_wireless() {
 
 group_ruijie() {
 	section '锐捷认证'
+
+	# 这个包不再编进固件：校园网由每台电脑的浏览器直接登录，路由器侧不持有
+	# 凭据也没有会话要维持。没装就没东西可查——否则「按设计没装」会被报成
+	# 一条 FAIL，而 FAIL 是留给真故障的。
+	if [ ! -x "${ROOT}/usr/libexec/ruijie-auth" ]; then
+		info '锐捷认证没有安装：路由器侧不做认证，由电脑浏览器直接登录'
+		return
+	fi
 
 	cfg="${ROOT}/etc/config/ruijie"
 	if [ ! -f "$cfg" ]; then
@@ -912,7 +921,7 @@ group_packages() {
 watchcat luci-app-watchcat ddns-scripts luci-app-ddns p910nd luci-app-p910nd
 kmod-usb-printer kmod-usb-net-cdc-mbim kmod-usb-net-rndis kmod-usb-net-cdc-ncm umbim
 luci-proto-mbim kmod-tcp-bbr zram-swap irqbalance curl jsonfilter luci-compat
-ruijie-auth luci-i18n-base-zh-cn kmod-nft-queue kmod-nft-tproxy'
+uuplugin luci-i18n-base-zh-cn kmod-nft-queue kmod-nft-tproxy'
 	missing=''
 	for pkg in $core; do
 		pkg_installed "$pkg" || missing="${missing} ${pkg}"

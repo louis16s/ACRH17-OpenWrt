@@ -1,0 +1,10 @@
+<%
+-- 用 Template 而不是 CBI DummyValue，才能给出一块真正的 <pre>。
+-- dashboard.css 由 dashboard.htm 载入，CBI 模型总是先 append 那一个。
+local pcdata = require "luci.xml".pcdata
+local lines = self.lines or ""
+%>
+<details class="uu-logs">
+	<summary>插件日志</summary>
+	<pre><%=pcdata(lines ~= "" and lines or "暂无日志")%></pre>
+</details>

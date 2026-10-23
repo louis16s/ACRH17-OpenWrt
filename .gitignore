@@ -3,3 +3,5 @@
 /logs/
 __pycache__/
 .DS_Store
+# 本地目标循环与工具状态，不进仓库
+/.workbuddy/

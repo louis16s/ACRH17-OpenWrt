@@ -149,7 +149,12 @@ class Fixture:
             f'  enable) ln -sf "$0" {self.root}/etc/rc.d/S95ruijie-auth ;;\n'
             'esac\n'
             'exit 0\n'), 0o755)
-        (self.root / 'etc/rc.d').mkdir(exist_ok=True)
+        self.make_rc_d()
+
+    def make_rc_d(self):
+        rc_d = self.root / 'etc/rc.d'
+        if not rc_d.is_dir():
+            rc_d.mkdir(parents=True)
 
     def write_stubs(self):
         self.command('uci', UCI_MOCK.replace('@STATE@', str(self.uci_state)).replace('@PYTHON@', sys.executable))
@@ -210,7 +215,7 @@ class Fixture:
         self.pw_mode.write_text(mode, encoding='utf-8')
 
     def add_rc_d_link(self):
-        (self.root / 'etc/rc.d').mkdir(exist_ok=True)
+        self.make_rc_d()
         link = self.root / 'etc/rc.d/S95ruijie-auth'
         if not link.exists():
             link.symlink_to(self.root / 'etc/init.d/ruijie-auth')
@@ -385,6 +390,17 @@ class DetectionTests(CampusTestCase):
         self.assertIn('认证服务是关的', result.stdout)
         self.assertNotIn('Traceback', result.stdout + result.stderr)
 
+    def test_missing_package_points_at_the_build_flag(self):
+        # 固件默认不编 ruijie-auth（校园网由电脑浏览器直接登录），所以「缺包」
+        # 才是这个脚本对着标准镜像跑的常态：报错要指向改哪一行，而不是只说少
+        # 了个文件——否则拿到这台机器的人会去 opkg 里找一个不存在的包名。
+        for rel in ('usr/libexec/ruijie-auth', 'etc/init.d/ruijie-auth'):
+            (self.fixture.root / rel).unlink()
+        result = self.fixture.run(mode='check')
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('CONFIG_PACKAGE_ruijie-auth 改成 =y', result.stdout)
+        self.assertNotIn('缺少 /etc/init.d/ruijie-auth', result.stdout)
+
     def test_check_mode_changes_nothing(self):
         before_tree = self.fixture.snapshot()
         before_uci = dict(self.fixture.uci_now())
@@ -475,7 +491,10 @@ class PortalAddressTests(CampusTestCase):
         # 透明代理或上级网关也会重定向，但它的 origin 不是门户。
         f.set_redirect('http://192.168.1.1/login.html', code=302)
         result = f.run(mode='fix')
-        self.assertIn('但不是门户登录页', result.stdout)
+        self.assertIn('非门户重定向', result.stdout)
+        # 只报来源，不回显整条 Location：那里面通常带着本机 MAC 与 wlanuserip。
+        self.assertIn('192.168.1.1', result.stdout)
+        self.assertNotIn('/login.html', result.stdout)
         self.assertEqual(f.uci_now()['ruijie.main.server'], '')
         self.assertEqual(f.uci_now()['ruijie.main.query_string'], '')
 

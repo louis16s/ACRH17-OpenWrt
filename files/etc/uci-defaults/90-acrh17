@@ -1,6 +1,6 @@
 #!/bin/sh
 # Only ordinary UCI settings. Preserve the upstream board/radio definitions.
-chmod 600 /etc/config/ruijie
+# 锐捷 ePortal 没有编进固件（电脑浏览器直接登录），所以这里不再有它的配置项。
 # /etc/rc.d appears in no keep.d entry and sysupgrade deletes and recreates the
 # rootfs_data volume, so these services come back enabled after every upgrade
 # while the guard below stops this script from re-applying the default. Disable
@@ -194,12 +194,6 @@ uci -q commit turboacc
 /etc/init.d/turboacc start
 
 # Commands remain short and read the USB WAN logical interface from UCI.
-uci -q add luci command
-uci -q set luci.@command[-1].name='重新认证锐捷'
-uci -q set luci.@command[-1].command='/usr/libexec/ruijie-auth reauth'
-uci -q add luci command
-uci -q set luci.@command[-1].name='刷新锐捷认证参数'
-uci -q set luci.@command[-1].command='/usr/libexec/ruijie-refresh-query capture'
 uci -q add luci command
 uci -q set luci.@command[-1].name='重启 UA3F'
 uci -q set luci.@command[-1].command='/etc/init.d/ua3f restart'

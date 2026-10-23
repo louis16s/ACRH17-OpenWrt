@@ -720,7 +720,10 @@ class RefreshQueryTests(unittest.TestCase):
             '#!/usr/bin/env python3\n'
             'import pathlib, shutil, sys\n'
             'shutil.copyfile(' + repr(str(self.state_file)) + ', ' + repr(str(self.seen_file)) + ')\n'
-            'sys.exit(int(pathlib.Path(' + repr(str(self.auth_rc)) + ').read_text().strip()))\n'
+            'rc = int(pathlib.Path(' + repr(str(self.auth_rc)) + ').read_text().strip())\n'
+            'if rc == 1:\n'
+            '    pathlib.Path(' + repr(str(self.dir / 'ruijie-auth.last')) + ').write_text("login: portal rejected request\\n")\n'
+            'sys.exit(rc)\n'
         )
         for name in ('uci', 'ubus', 'jsonfilter', 'logger', 'curl', 'auth'):
             (self.dir / name).chmod(0o755)
