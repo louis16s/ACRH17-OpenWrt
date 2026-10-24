@@ -210,8 +210,16 @@ jobs:
           mkdir -p fast-base/packages
           cp openwrt/bin/targets/ipq40xx/generic/*imagebuilder*.tar.zst fast-base/
           # uuplugin 不在 ImageBuilder 的包索引里（二进制是构建时从上游取的），
-          # 把编好的 ipk 一并放进基线，快速打包才能装出同样的插件。
-          cp openwrt/bin/packages/*/base/uuplugin_*.ipk fast-base/packages/
+          # 把编好的 ipk 一并放进基线，快速打包才能装出同样的插件。只有带这个
+          # 包的变体才有 ipk：另外三个分支的配置里没有它，无条件 cp 会让它们
+          # 在通配符不匹配时直接失败（上一次矩阵构建就是这么挂的）。
+          ipk=$(ls openwrt/bin/packages/*/*/uuplugin_*.ipk 2>/dev/null | head -n 1 || true)
+          if [ -n "$ipk" ]; then
+            cp "$ipk" fast-base/packages/
+            echo "baseline carries $(basename "$ipk")"
+          else
+            echo 'no uuplugin in this variant; baseline keeps the ImageBuilder index only'
+          fi
           python3 scripts/fast-base.py stamp fast-base
 
       - name: Upload firmware

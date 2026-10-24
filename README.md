@@ -710,3 +710,29 @@ UU 插件同时接入镜像，并且把「不用的时候不占资源」写进�
 「有页面没插件」的固件。其二，doctor 的核心软件包清单现在包含 `uuplugin`——
 它被配置选中就该在镜像里，清单和 `configs/acrh17.config` 由一条测试锁在一起，
 以后谁把某个包 `=y` 了却忘了让 doctor 检查，测试会先叫。
+
+## 2026-10-24 第一次矩阵构建失败：配方的两次展开
+
+run #68 四个变体全红，是两个互不相干的错误。
+
+`openwrt-campus` 死在 `Compile firmware`，日志里是这句：
+
+```
+tar -xzf .../dl/uu.tar.gz -C .../uuplugin-14.10.6
+uuplugin:  missing from uu.tar.gz
+```
+
+注意「uuplugin:」后面有两个空格——`$f` 是空的。`Build/Prepare` 里写的是 shell
+循环 `for f in uuplugin ... ; do [ -f $(PKG_BUILD_DIR)/$$f ] || ...`，看起来没问题：
+`$$` 在 make 里就是 `$`。但 OpenWrt 会把配方展开**两次**——`$(eval $(call
+Build/CoreTargets))` 生成规则时展开一次（`$$f` → `$f`），规则体真正执行时再展开
+一次（`$f` 被当成 make 变量 `f`，空）。于是 `[ -f .../ ]` 恒假，每个包都判「缺文件」。
+改成串联的 `[ -f a ] && [ -f b ] && ...` 就与展开次数无关；配方里不留任何 `$`，
+需要的东西全部交给 make 展开。单元测试也补了同一条守卫：配方在第一次展开后若还
+残留 `$` 就直接失败，不必等一次完整构建。
+
+另外三个变体死在 `Verify firmware and core packages`，原因是我在 `build.yml` 里
+无条件 `cp openwrt/bin/packages/*/base/uuplugin_*.ipk fast-base/packages/`：它们所在
+的分支没有这个包，通配符不匹配，`cp` 非零退出。改成先 `ls` 再判断，没有就打印
+一行说明并跳过。顺带把通配符放宽成 `*/*`——本地包落在哪个 feed 目录不该由这条
+命令假定。

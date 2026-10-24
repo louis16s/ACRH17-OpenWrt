@@ -349,7 +349,13 @@ class PackageRecipeTests(unittest.TestCase):
                 '$(1)': str(self.root),
             }.items():
                 line = line.replace(key, value)
-            yield line.replace('$$', '$')
+            line = line.replace('$$', '$')
+            # OpenWrt 对配方展开两次：define 里的 $$ 第一次变成 $，写进 recipe
+            # 时再展开一次，`$f` 就成了空的 make 变量。曾因此让构建在
+            # `[ -f $(PKG_BUILD_DIR)/ ]` 上恒假、每个包都报缺文件。所以配方里
+            # 不留任何 $——需要的东西全部交给 make 展开，shell 只负责执行。
+            self.assertNotIn('$', line, '配方在第二次展开后残留 $：%s' % line)
+            yield line
 
     def run_recipe(self, name):
         result = subprocess.run(['sh', '-e', '-'], input='\n'.join(self.recipe(name)),
@@ -360,6 +366,13 @@ class PackageRecipeTests(unittest.TestCase):
         # 默认解包会往 $(PKG_BUILD_DIR)/.. 展开，那会把四个文件撒到 build_dir 里。
         self.run_recipe('Build/Prepare')
         self.assertEqual(sorted(p.name for p in self.build.iterdir()), sorted(self.FILES))
+
+    def test_prepare_rejects_an_archive_without_all_four_files(self):
+        # 归档形状变了就该在解包这一步停下，而不是装出一个缺二进制的包。
+        with tarfile.open(self.dl / 'uu.tar.gz', 'w:gz') as tar:
+            tar.add(self.dir / 'src/uuplugin', arcname='uuplugin')
+        with self.assertRaises(AssertionError):
+            self.run_recipe('Build/Prepare')
 
     def test_install_produces_exactly_the_expected_tree(self):
         self.run_recipe('Build/Prepare')

@@ -54,13 +54,16 @@ endef
 #
 # 目录要自己建：$(PKG_BUILD_DIR) 只由 Build/Prepare/Default 创建，覆盖了这个
 # 宏就没人建了，tar -C 会直接失败。
+#
+# 校验不用 shell 循环变量：OpenWrt 会把配方展开两次，`$$f` 第一次变成 `$f`，
+# 第二次 `$f` 被当成 make 变量展开成空串，于是 `[ -f $(PKG_BUILD_DIR)/ ]` 恒假，
+# 每个包都报「缺文件」。写成串联的 test -f 就与展开次数无关。
 define Build/Prepare
 	mkdir -p $(PKG_BUILD_DIR)
 	$(TAR) -xzf $(DL_DIR)/$(PKG_SOURCE) -C $(PKG_BUILD_DIR)
-	@for f in uuplugin xuplugin-guardian xtables-nft-multi uu.conf; do \
-		[ -f $(PKG_BUILD_DIR)/$$f ] || { \
-			echo "uuplugin: $$f missing from $(PKG_SOURCE)"; exit 1; }; \
-	done
+	@[ -f $(PKG_BUILD_DIR)/uuplugin ] && [ -f $(PKG_BUILD_DIR)/xuplugin-guardian ] && \
+		[ -f $(PKG_BUILD_DIR)/xtables-nft-multi ] && [ -f $(PKG_BUILD_DIR)/uu.conf ] || \
+		{ echo "uuplugin: $(PKG_SOURCE) must carry uuplugin, xuplugin-guardian, xtables-nft-multi and uu.conf at its root" >&2; exit 1; }
 endef
 
 define Build/Compile
